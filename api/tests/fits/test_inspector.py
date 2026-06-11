@@ -10,7 +10,9 @@ from app.fits.errors import FitsStatisticsError, InvalidFitsError, UnsupportedFi
 from app.fits.inspector import (
     CHUNK_TARGET_BYTES,
     MEDIAN_SAMPLE_LIMIT,
+    _bounded_raw_chunks,
     _chunk_length,
+    _is_supported_image,
     inspect_fits,
 )
 from app.fits.schemas import FitsInspection
@@ -18,6 +20,7 @@ from tests.fixtures.fits_factory import (
     make_corrupt_fits,
     make_fits,
     make_rgb_fits,
+    make_scaled_fits,
     make_table_only_fits,
     make_uint16_fits,
 )
@@ -78,6 +81,31 @@ def test_rejects_ambiguous_three_channel_layout(tmp_path: Path) -> None:
         inspect_fits(path)
 
 
+@pytest.mark.parametrize("shape", [(8,), (2, 3, 4, 5)])
+def test_rejects_unsupported_image_dimensions(tmp_path: Path, shape: tuple[int, ...]) -> None:
+    path = make_fits(
+        tmp_path,
+        np.zeros(shape, dtype=np.float32),
+        name=f"{len(shape)}d.fits",
+    )
+
+    with pytest.raises(UnsupportedFitsDataError):
+        inspect_fits(path)
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        np.dtype(np.bool_),
+        np.dtype(object),
+        np.dtype("U4"),
+        np.dtype("S4"),
+    ],
+)
+def test_non_numeric_and_boolean_dtypes_are_not_supported(dtype: np.dtype[Any]) -> None:
+    assert _is_supported_image([4, 4], dtype) is False
+
+
 def test_equal_pixel_count_selects_lower_hdu_index(tmp_path: Path) -> None:
     path = make_fits(
         tmp_path,
@@ -123,6 +151,19 @@ def test_uint16_scaling_produces_physical_statistics(tmp_path: Path) -> None:
     assert statistics.mean == pytest.approx(float(np.mean(data, dtype=np.float64)))
     assert statistics.median == pytest.approx(float(np.median(data)))
     assert statistics.standard_deviation == pytest.approx(float(np.std(data, dtype=np.float64)))
+
+
+def test_non_default_bscale_and_bzero_produce_physical_statistics(tmp_path: Path) -> None:
+    path, raw_data = make_scaled_fits(tmp_path)
+    physical = raw_data.astype(np.float64) * 2.5 - 10.0
+
+    statistics = inspect_fits(path).statistics
+
+    assert statistics.minimum == float(np.min(physical))
+    assert statistics.maximum == float(np.max(physical))
+    assert statistics.mean == pytest.approx(float(np.mean(physical)))
+    assert statistics.median == pytest.approx(float(np.median(physical)))
+    assert statistics.standard_deviation == pytest.approx(float(np.std(physical)))
 
 
 def test_header_is_selected_hdu_only_bounded_and_json_safe(tmp_path: Path) -> None:
@@ -190,6 +231,36 @@ def test_opens_with_lazy_memmap_and_converts_only_bounded_chunks(
     assert converted_sizes
     assert max(converted_sizes) <= 64
     assert np.prod((32, 4)) * np.dtype(np.float32).itemsize > max(converted_sizes)
+
+
+def test_raw_chunks_stay_bounded_when_one_row_exceeds_target() -> None:
+    class SyntheticChunk:
+        def __init__(self, nbytes: int) -> None:
+            self.nbytes = nbytes
+
+    class SyntheticArray:
+        shape = (2, CHUNK_TARGET_BYTES // np.dtype(np.float32).itemsize + 1)
+        dtype = np.dtype(np.float32)
+
+        def __init__(self) -> None:
+            self.keys: list[tuple[int | slice, ...]] = []
+
+        def __getitem__(self, key: tuple[int | slice, ...]) -> SyntheticChunk:
+            self.keys.append(key)
+            row_key, column_key = key
+            assert isinstance(row_key, int)
+            assert isinstance(column_key, slice)
+            width = int(column_key.stop) - int(column_key.start)
+            return SyntheticChunk(width * self.dtype.itemsize)
+
+    data = SyntheticArray()
+
+    chunks = list(_bounded_raw_chunks(data))
+
+    assert chunks
+    assert max(chunk.nbytes for chunk in chunks) <= CHUNK_TARGET_BYTES
+    assert len(data.keys) == 4
+    assert all(isinstance(key[0], int) for key in data.keys)
 
 
 def test_median_sample_is_capped_and_even_for_large_logical_input(

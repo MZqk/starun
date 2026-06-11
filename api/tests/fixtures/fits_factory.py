@@ -50,3 +50,13 @@ def make_rgb_fits(tmp_path: Path, shape: tuple[int, int, int], *, name: str) -> 
 def make_uint16_fits(tmp_path: Path) -> tuple[Path, Array]:
     data = np.array([[0, 1], [32768, 65535]], dtype=np.uint16)
     return make_fits(tmp_path, data, name="uint16.fits"), data
+
+
+def make_scaled_fits(tmp_path: Path) -> tuple[Path, Array]:
+    raw_data = np.array([[-4, 0], [8, 12]], dtype=np.int16)
+    path = tmp_path / "scaled.fits"
+    hdu = fits.PrimaryHDU(data=raw_data)
+    hdu.header["BSCALE"] = 2.5
+    hdu.header["BZERO"] = -10.0
+    hdu.writeto(path)
+    return path, raw_data

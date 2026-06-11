@@ -97,7 +97,10 @@ def _hdu_kind(hdu: Any) -> str:
 
 
 def _is_supported_image(shape: list[int], dtype: np.dtype[Any]) -> bool:
-    if dtype.kind not in {"i", "u", "f"}:
+    is_boolean = np.issubdtype(dtype, np.bool_)
+    is_integer = np.issubdtype(dtype, np.integer)
+    is_floating = np.issubdtype(dtype, np.floating)
+    if is_boolean or not (is_integer or is_floating):
         return False
     if len(shape) == 2:
         return True
@@ -118,15 +121,33 @@ def _chunk_length(shape: tuple[int, ...], dtype: np.dtype[Any]) -> int:
     return max(1, CHUNK_TARGET_BYTES // bytes_per_slice)
 
 
+def _bounded_raw_chunks(data: Any) -> Iterator[Any]:
+    shape = tuple(int(length) for length in data.shape)
+    dtype = np.dtype(data.dtype)
+    max_elements = max(1, CHUNK_TARGET_BYTES // dtype.itemsize)
+
+    def chunks_at_axis(prefix: tuple[int | slice, ...], axis: int) -> Iterator[Any]:
+        trailing_elements = int(np.prod(shape[axis + 1 :], dtype=np.int64))
+        axis_chunk_length = max_elements // max(1, trailing_elements)
+        if axis_chunk_length > 0:
+            remaining_axes = (slice(None),) * (len(shape) - axis - 1)
+            for start in range(0, shape[axis], axis_chunk_length):
+                stop = min(shape[axis], start + axis_chunk_length)
+                yield data[prefix + (slice(start, stop),) + remaining_axes]
+            return
+
+        for index in range(shape[axis]):
+            yield from chunks_at_axis(prefix + (index,), axis + 1)
+
+    yield from chunks_at_axis((), 0)
+
+
 def _physical_chunks(hdu: Any) -> Iterator[np.ndarray[Any, np.dtype[np.float64]]]:
     data = hdu.data
-    shape = tuple(int(length) for length in data.shape)
-    chunk_length = _chunk_length(shape, np.dtype(data.dtype))
     bscale = float(hdu.header.get("BSCALE", 1.0))
     bzero = float(hdu.header.get("BZERO", 0.0))
 
-    for start in range(0, shape[0], chunk_length):
-        raw_chunk = data[start : start + chunk_length]
+    for raw_chunk in _bounded_raw_chunks(data):
         values = np.asarray(raw_chunk, dtype=np.float64)
         if bscale != 1.0:
             values *= bscale
