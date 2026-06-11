@@ -30,6 +30,7 @@ from tests.fixtures.fits_factory import (
     make_compressed_only_fits,
     make_corrupt_fits,
     make_fits,
+    make_float_with_blank_header_fits,
     make_rgb_fits,
     make_scaled_fits,
     make_table_only_fits,
@@ -228,6 +229,21 @@ def test_blank_is_excluded_before_scaling(tmp_path: Path) -> None:
     assert statistics.mean == pytest.approx(float(np.mean(physical)))
     assert statistics.median == pytest.approx(float(np.median(physical)))
     assert statistics.standard_deviation == pytest.approx(float(np.std(physical)))
+
+
+def test_float_image_ignores_invalid_blank_header(tmp_path: Path) -> None:
+    path, data = make_float_with_blank_header_fits(tmp_path)
+
+    statistics = inspect_fits(path).statistics
+
+    assert statistics.finite_pixel_count == data.size
+    assert statistics.minimum == float(np.min(data))
+    assert statistics.maximum == float(np.max(data))
+    assert statistics.mean == pytest.approx(float(np.mean(data, dtype=np.float64)))
+    assert statistics.median == pytest.approx(float(np.median(data)))
+    assert statistics.standard_deviation == pytest.approx(
+        float(np.std(data, dtype=np.float64))
+    )
 
 
 def test_header_is_selected_hdu_only_bounded_and_json_safe(tmp_path: Path) -> None:

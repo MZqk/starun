@@ -74,6 +74,15 @@ def make_blank_scaled_fits(tmp_path: Path) -> tuple[Path, Array, int]:
     return path, raw_data, blank
 
 
+def make_float_with_blank_header_fits(tmp_path: Path) -> tuple[Path, Array]:
+    data = np.array([[-1.0, 0.0], [2.0, 4.0]], dtype=np.float32)
+    path = tmp_path / "float-with-blank.fits"
+    hdu = fits.PrimaryHDU(data=data)
+    hdu.header["BLANK"] = 0
+    hdu.writeto(path, output_verify="silentfix")
+    return path, data
+
+
 def make_compressed_only_fits(tmp_path: Path) -> Path:
     path = tmp_path / "compressed-only.fits"
     compressed = fits.CompImageHDU(

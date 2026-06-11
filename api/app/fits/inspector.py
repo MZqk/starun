@@ -190,7 +190,13 @@ def _physical_chunks(
     data = hdu.data
     bscale = float(hdu.header.get("BSCALE", 1.0))
     bzero = float(hdu.header.get("BZERO", 0.0))
-    blank = hdu.header.get("BLANK")
+    raw_dtype = np.dtype(data.dtype)
+    blank = (
+        hdu.header.get("BLANK")
+        if np.issubdtype(raw_dtype, np.integer)
+        and not np.issubdtype(raw_dtype, np.bool_)
+        else None
+    )
 
     for raw_chunk in _bounded_raw_chunks(data):
         values = np.array(raw_chunk, dtype=np.float64, copy=True)
