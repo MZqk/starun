@@ -1,0 +1,1 @@
+"""Streaming FITS upload API."""
