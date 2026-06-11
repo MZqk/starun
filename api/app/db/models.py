@@ -13,6 +13,8 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    false,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -97,7 +99,7 @@ class Task(Base):
     type: Mapped[TaskType] = mapped_column(enum_type(TaskType), nullable=False)
     status: Mapped[TaskStatus] = mapped_column(enum_type(TaskStatus), nullable=False)
     stage: Mapped[str | None] = mapped_column(String)
-    progress: Mapped[int] = mapped_column(Integer, default=0)
+    progress: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     client_id_hash: Mapped[str] = mapped_column(String, nullable=False)
     ip_hash: Mapped[str] = mapped_column(String, nullable=False)
     upload_id: Mapped[str | None] = mapped_column(ForeignKey("uploads.id"))
@@ -108,9 +110,17 @@ class Task(Base):
     result_manifest: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     error_code: Mapped[str | None] = mapped_column(String)
     error_message: Mapped[str | None] = mapped_column(String)
-    retryable: Mapped[bool] = mapped_column(Boolean, default=False)
-    quota_charged: Mapped[bool] = mapped_column(Boolean, default=False)
-    free_retry_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    retryable: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    quota_charged: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=false(),
+    )
+    free_retry_used: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=false(),
+    )
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -143,7 +153,11 @@ class TaskEvent(Base):
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     level: Mapped[EventLevel] = mapped_column(enum_type(EventLevel), nullable=False)
     event_type: Mapped[str] = mapped_column(String, nullable=False)
-    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSON,
+        default=dict,
+        server_default=text("'{}'"),
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     task: Mapped[Task] = relationship(back_populates="events")
 
@@ -163,4 +177,4 @@ class DailyUsage(Base):
     date: Mapped[Date] = mapped_column(nullable=False)
     client_id_hash: Mapped[str] = mapped_column(String, nullable=False)
     ip_hash: Mapped[str] = mapped_column(String, nullable=False)
-    count: Mapped[int] = mapped_column(Integer, default=0)
+    count: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
