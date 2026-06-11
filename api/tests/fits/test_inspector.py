@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import PropertyMock
 
 import numpy as np
 import pytest
@@ -9,14 +10,24 @@ from astropy.io import fits
 from app.fits.errors import FitsStatisticsError, InvalidFitsError, UnsupportedFitsDataError
 from app.fits.inspector import (
     CHUNK_TARGET_BYTES,
+    HEADER_ENTRY_LIMIT,
+    HEADER_SCAN_LIMIT,
+    HEADER_TOTAL_BYTES_LIMIT,
+    HEADER_VALUE_LENGTH_LIMIT,
     MEDIAN_SAMPLE_LIMIT,
+    WORKING_BYTES_PER_ELEMENT,
     _bounded_raw_chunks,
     _chunk_length,
     _is_supported_image,
+    _max_chunk_elements,
+    _summarize_hdu,
+    _safe_header,
     inspect_fits,
 )
 from app.fits.schemas import FitsInspection
 from tests.fixtures.fits_factory import (
+    make_blank_scaled_fits,
+    make_compressed_only_fits,
     make_corrupt_fits,
     make_fits,
     make_rgb_fits,
@@ -54,6 +65,45 @@ def test_rejects_table_only_fits_after_listing_no_supported_images(tmp_path: Pat
 
     assert exc_info.value.error_code == "unsupported_fits_data"
     assert str(exc_info.value) == "The FITS file does not contain a supported image."
+
+
+def test_compressed_image_is_listed_without_decompression(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = make_compressed_only_fits(tmp_path)
+    data_guard = PropertyMock(side_effect=AssertionError("compressed data was decompressed"))
+    monkeypatch.setattr(fits.CompImageHDU, "data", data_guard)
+
+    with pytest.raises(UnsupportedFitsDataError):
+        inspect_fits(path)
+
+    assert data_guard.call_count == 0
+
+
+def test_compressed_image_summary_uses_header_metadata_without_data_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hdu = object.__new__(fits.CompImageHDU)
+    hdu.__dict__["_header"] = fits.Header(
+        [
+            ("XTENSION", "IMAGE"),
+            ("BITPIX", 16),
+            ("NAXIS", 2),
+            ("NAXIS1", 9),
+            ("NAXIS2", 7),
+            ("EXTNAME", "COMPRESSED"),
+        ]
+    )
+    data_guard = PropertyMock(side_effect=AssertionError("compressed data was decompressed"))
+    monkeypatch.setattr(fits.CompImageHDU, "data", data_guard)
+
+    summary = _summarize_hdu(1, hdu)
+
+    assert summary.kind == "compressed_image"
+    assert summary.shape == [7, 9]
+    assert summary.dtype == "int16"
+    assert summary.supported is False
+    assert data_guard.call_count == 0
 
 
 def test_rejects_corrupt_bytes_with_safe_error(tmp_path: Path) -> None:
@@ -166,6 +216,20 @@ def test_non_default_bscale_and_bzero_produce_physical_statistics(tmp_path: Path
     assert statistics.standard_deviation == pytest.approx(float(np.std(physical)))
 
 
+def test_blank_is_excluded_before_scaling(tmp_path: Path) -> None:
+    path, raw_data, blank = make_blank_scaled_fits(tmp_path)
+    physical = raw_data[raw_data != blank].astype(np.float64) * 2.5 - 10.0
+
+    statistics = inspect_fits(path).statistics
+
+    assert statistics.finite_pixel_count == 3
+    assert statistics.minimum == float(np.min(physical))
+    assert statistics.maximum == float(np.max(physical))
+    assert statistics.mean == pytest.approx(float(np.mean(physical)))
+    assert statistics.median == pytest.approx(float(np.median(physical)))
+    assert statistics.standard_deviation == pytest.approx(float(np.std(physical)))
+
+
 def test_header_is_selected_hdu_only_bounded_and_json_safe(tmp_path: Path) -> None:
     primary_header = fits.Header()
     primary_header["PRIMARY"] = "not selected"
@@ -196,6 +260,32 @@ def test_header_is_selected_hdu_only_bounded_and_json_safe(tmp_path: Path) -> No
     json.loads(inspection.model_dump_json())
 
 
+def test_header_bounds_scan_entries_values_duplicates_and_total_bytes() -> None:
+    header = fits.Header()
+    header.append(("DUPLIC", "first"))
+    header.append(("DUPLIC", "second"))
+    header["LONG"] = "x" * (HEADER_VALUE_LENGTH_LIMIT * 2)
+    for index in range(HEADER_ENTRY_LIMIT * 2):
+        header.append((f"V{index:07d}", "y" * HEADER_VALUE_LENGTH_LIMIT))
+
+    safe = _safe_header(header)
+    serialized = json.dumps(safe, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+    assert safe["DUPLIC"] == "second"
+    assert len(safe["LONG"]) == HEADER_VALUE_LENGTH_LIMIT
+    assert len(safe) <= HEADER_ENTRY_LIMIT
+    assert len(serialized) <= HEADER_TOTAL_BYTES_LIMIT
+
+
+def test_header_scan_is_capped_before_late_cards() -> None:
+    class SyntheticHeader:
+        cards = [
+            fits.Card("COMMENT", f"ignored {index}") for index in range(HEADER_SCAN_LIMIT)
+        ] + [fits.Card("BEYOND", "must not be scanned")]
+
+    assert "BEYOND" not in _safe_header(SyntheticHeader())
+
+
 def test_opens_with_lazy_memmap_and_converts_only_bounded_chunks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -205,21 +295,22 @@ def test_opens_with_lazy_memmap_and_converts_only_bounded_chunks(
     real_open = fits.open
     open_kwargs: dict[str, Any] = {}
     converted_sizes: list[int] = []
-    real_asarray = np.asarray
+    real_array = np.array
 
     def recording_open(*args: Any, **kwargs: Any) -> fits.HDUList:
         open_kwargs.update(kwargs)
         return real_open(*args, **kwargs)
 
-    def recording_asarray(value: Any, *args: Any, **kwargs: Any) -> np.ndarray:
+    def recording_array(value: Any, *args: Any, **kwargs: Any) -> np.ndarray:
         dtype = kwargs.get("dtype", args[0] if args else None)
         if dtype is not None and np.dtype(dtype) == np.dtype(np.float64):
-            converted_sizes.append(int(real_asarray(value).nbytes))
-        return real_asarray(value, *args, **kwargs)
+            converted_sizes.append(int(np.asarray(value).nbytes))
+            assert kwargs.get("copy") is True
+        return real_array(value, *args, **kwargs)
 
     monkeypatch.setattr(inspector, "CHUNK_TARGET_BYTES", 64)
     monkeypatch.setattr(inspector.fits, "open", recording_open)
-    monkeypatch.setattr(inspector.np, "asarray", recording_asarray)
+    monkeypatch.setattr(inspector.np, "array", recording_array)
 
     inspect_fits(path)
 
@@ -259,8 +350,17 @@ def test_raw_chunks_stay_bounded_when_one_row_exceeds_target() -> None:
 
     assert chunks
     assert max(chunk.nbytes for chunk in chunks) <= CHUNK_TARGET_BYTES
-    assert len(data.keys) == 4
+    assert len(data.keys) > 4
     assert all(isinstance(key[0], int) for key in data.keys)
+
+
+@pytest.mark.parametrize("dtype", [np.dtype(np.uint8), np.dtype(np.float64)])
+def test_transformed_working_set_is_bounded(dtype: np.dtype[Any]) -> None:
+    max_elements = _max_chunk_elements(dtype)
+
+    assert max_elements * WORKING_BYTES_PER_ELEMENT <= CHUNK_TARGET_BYTES
+    assert (max_elements + 1) * WORKING_BYTES_PER_ELEMENT > CHUNK_TARGET_BYTES
+    assert max_elements * dtype.itemsize <= CHUNK_TARGET_BYTES
 
 
 def test_median_sample_is_capped_and_even_for_large_logical_input(

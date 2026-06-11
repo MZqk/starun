@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -14,8 +15,22 @@ from app.fits.errors import (
 from app.fits.schemas import BasicStatistics, FitsInspection, HduSummary
 
 CHUNK_TARGET_BYTES = 16 * 1024 * 1024
+# float64 transformed values + boolean validity mask + float64 scratch/indices.
+WORKING_BYTES_PER_ELEMENT = 17
 MEDIAN_SAMPLE_LIMIT = 100_000
 HEADER_ENTRY_LIMIT = 256
+HEADER_SCAN_LIMIT = 512
+HEADER_VALUE_LENGTH_LIMIT = 2048
+HEADER_TOTAL_BYTES_LIMIT = 64 * 1024
+
+_BITPIX_DTYPES: dict[int, np.dtype[Any]] = {
+    8: np.dtype(np.uint8),
+    16: np.dtype(np.int16),
+    32: np.dtype(np.int32),
+    64: np.dtype(np.int64),
+    -32: np.dtype(np.float32),
+    -64: np.dtype(np.float64),
+}
 
 
 def inspect_fits(path: Path) -> FitsInspection:
@@ -57,7 +72,10 @@ def inspect_fits(path: Path) -> FitsInspection:
 
 def _summarize_hdu(index: int, hdu: Any) -> HduSummary:
     kind = _hdu_kind(hdu)
-    if kind in {"primary_image", "image"}:
+    if kind == "compressed_image":
+        shape, dtype = _compressed_image_metadata(hdu.header)
+        supported = False
+    elif kind in {"primary_image", "image"}:
         data = hdu.data
         if data is None:
             shape = None
@@ -68,7 +86,7 @@ def _summarize_hdu(index: int, hdu: Any) -> HduSummary:
             array_dtype = np.dtype(data.dtype)
             dtype = array_dtype.name
             supported = _is_supported_image(shape, array_dtype)
-    else:
+    elif kind != "compressed_image":
         raw_shape = getattr(hdu, "shape", None)
         shape = [int(length) for length in raw_shape] if raw_shape else None
         dtype = None
@@ -87,13 +105,31 @@ def _summarize_hdu(index: int, hdu: Any) -> HduSummary:
 def _hdu_kind(hdu: Any) -> str:
     if isinstance(hdu, fits.PrimaryHDU):
         return "primary_image"
+    if isinstance(hdu, fits.CompImageHDU):
+        return "compressed_image"
     if isinstance(hdu, fits.BinTableHDU):
         return "binary_table"
     if isinstance(hdu, fits.TableHDU):
         return "ascii_table"
-    if isinstance(hdu, (fits.ImageHDU, fits.CompImageHDU)):
+    if isinstance(hdu, fits.ImageHDU):
         return "image"
     return "unknown"
+
+
+def _compressed_image_metadata(header: fits.Header) -> tuple[list[int] | None, str | None]:
+    axis_count = header.get("NAXIS")
+    bitpix = header.get("BITPIX")
+    if not isinstance(axis_count, int) or axis_count < 0:
+        shape = None
+    else:
+        axis_lengths = [header.get(f"NAXIS{axis}") for axis in range(1, axis_count + 1)]
+        shape = (
+            [int(length) for length in reversed(axis_lengths)]
+            if all(isinstance(length, int) for length in axis_lengths)
+            else None
+        )
+    dtype = _BITPIX_DTYPES.get(bitpix)
+    return shape, dtype.name if dtype is not None else None
 
 
 def _is_supported_image(shape: list[int], dtype: np.dtype[Any]) -> bool:
@@ -121,10 +157,16 @@ def _chunk_length(shape: tuple[int, ...], dtype: np.dtype[Any]) -> int:
     return max(1, CHUNK_TARGET_BYTES // bytes_per_slice)
 
 
+def _max_chunk_elements(dtype: np.dtype[Any]) -> int:
+    raw_limit = CHUNK_TARGET_BYTES // max(1, dtype.itemsize)
+    working_limit = CHUNK_TARGET_BYTES // WORKING_BYTES_PER_ELEMENT
+    return max(1, min(raw_limit, working_limit))
+
+
 def _bounded_raw_chunks(data: Any) -> Iterator[Any]:
     shape = tuple(int(length) for length in data.shape)
     dtype = np.dtype(data.dtype)
-    max_elements = max(1, CHUNK_TARGET_BYTES // dtype.itemsize)
+    max_elements = _max_chunk_elements(dtype)
 
     def chunks_at_axis(prefix: tuple[int | slice, ...], axis: int) -> Iterator[Any]:
         trailing_elements = int(np.prod(shape[axis + 1 :], dtype=np.int64))
@@ -142,18 +184,27 @@ def _bounded_raw_chunks(data: Any) -> Iterator[Any]:
     yield from chunks_at_axis((), 0)
 
 
-def _physical_chunks(hdu: Any) -> Iterator[np.ndarray[Any, np.dtype[np.float64]]]:
+def _physical_chunks(
+    hdu: Any,
+) -> Iterator[tuple[np.ndarray[Any, np.dtype[np.float64]], np.ndarray[Any, np.dtype[np.bool_]]]]:
     data = hdu.data
     bscale = float(hdu.header.get("BSCALE", 1.0))
     bzero = float(hdu.header.get("BZERO", 0.0))
+    blank = hdu.header.get("BLANK")
 
     for raw_chunk in _bounded_raw_chunks(data):
-        values = np.asarray(raw_chunk, dtype=np.float64)
+        values = np.array(raw_chunk, dtype=np.float64, copy=True)
+        if blank is not None:
+            valid = np.equal(raw_chunk, blank)
+            values[valid] = np.nan
         if bscale != 1.0:
             values *= bscale
         if bzero != 0.0:
             values += bzero
-        yield values
+        if blank is None:
+            valid = np.empty(values.shape, dtype=np.bool_)
+        np.isfinite(values, out=valid)
+        yield values, valid
 
 
 def _calculate_statistics(hdu: Any) -> BasicStatistics:
@@ -164,21 +215,26 @@ def _calculate_statistics(hdu: Any) -> BasicStatistics:
         minimum = np.inf
         maximum = -np.inf
 
-        for values in _physical_chunks(hdu):
-            finite = values[np.isfinite(values)]
-            chunk_count = int(finite.size)
+        for values, valid in _physical_chunks(hdu):
+            chunk_count = int(np.count_nonzero(valid))
             if chunk_count == 0:
                 continue
 
-            chunk_mean = float(np.mean(finite, dtype=np.float64))
-            chunk_m2 = float(np.sum((finite - chunk_mean) ** 2, dtype=np.float64))
+            chunk_sum = float(np.sum(values, where=valid, initial=0.0, dtype=np.float64))
+            chunk_mean = chunk_sum / chunk_count
+            squared_deviations = np.empty_like(values)
+            np.subtract(values, chunk_mean, out=squared_deviations)
+            np.square(squared_deviations, out=squared_deviations)
+            chunk_m2 = float(
+                np.sum(squared_deviations, where=valid, initial=0.0, dtype=np.float64)
+            )
             combined_count = count + chunk_count
             delta = chunk_mean - mean
             mean += delta * chunk_count / combined_count
             m2 += chunk_m2 + delta * delta * count * chunk_count / combined_count
             count = combined_count
-            minimum = min(minimum, float(np.min(finite)))
-            maximum = max(maximum, float(np.max(finite)))
+            minimum = min(minimum, float(np.min(values, where=valid, initial=np.inf)))
+            maximum = max(maximum, float(np.max(values, where=valid, initial=-np.inf)))
 
         if count == 0:
             raise FitsStatisticsError()
@@ -206,13 +262,14 @@ def _sampled_median(hdu: Any, finite_count: int) -> float:
     finite_offset = 0
     sample_offset = 0
 
-    for values in _physical_chunks(hdu):
-        finite = values[np.isfinite(values)].reshape(-1)
-        next_finite_offset = finite_offset + int(finite.size)
+    for values, valid in _physical_chunks(hdu):
+        valid_positions = np.flatnonzero(valid.reshape(-1))
+        next_finite_offset = finite_offset + int(valid_positions.size)
         next_sample_offset = int(np.searchsorted(ranks, next_finite_offset, side="left"))
         if next_sample_offset > sample_offset:
             local_ranks = ranks[sample_offset:next_sample_offset] - finite_offset
-            sample[sample_offset:next_sample_offset] = finite[local_ranks]
+            selected_positions = valid_positions[local_ranks]
+            sample[sample_offset:next_sample_offset] = values.reshape(-1)[selected_positions]
             sample_offset = next_sample_offset
         finite_offset = next_finite_offset
 
@@ -223,14 +280,27 @@ def _sampled_median(hdu: Any, finite_count: int) -> float:
 
 def _safe_header(header: fits.Header) -> dict[str, str | int | float | bool]:
     result: dict[str, str | int | float | bool] = {}
-    for card in header.cards:
+    for card in header.cards[:HEADER_SCAN_LIMIT]:
         key = str(card.keyword).strip()
         if not key or key.upper() in {"COMMENT", "HISTORY"}:
             continue
+        previous = result.get(key)
         result[key] = _safe_header_value(card.value)
+        if _serialized_header_size(result) > HEADER_TOTAL_BYTES_LIMIT:
+            if previous is None:
+                result.pop(key)
+            else:
+                result[key] = previous
+            break
         if len(result) >= HEADER_ENTRY_LIMIT:
             break
     return result
+
+
+def _serialized_header_size(header: dict[str, str | int | float | bool]) -> int:
+    return len(
+        json.dumps(header, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    )
 
 
 def _safe_header_value(value: Any) -> str | int | float | bool:
@@ -242,5 +312,5 @@ def _safe_header_value(value: Any) -> str | int | float | bool:
         converted = float(value)
         return converted if np.isfinite(converted) else str(converted)
     if isinstance(value, str):
-        return value
-    return str(value)
+        return value[:HEADER_VALUE_LENGTH_LIMIT]
+    return str(value)[:HEADER_VALUE_LENGTH_LIMIT]

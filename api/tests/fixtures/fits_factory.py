@@ -60,3 +60,25 @@ def make_scaled_fits(tmp_path: Path) -> tuple[Path, Array]:
     hdu.header["BZERO"] = -10.0
     hdu.writeto(path)
     return path, raw_data
+
+
+def make_blank_scaled_fits(tmp_path: Path) -> tuple[Path, Array, int]:
+    blank = -32768
+    raw_data = np.array([[blank, -4], [0, 8]], dtype=np.int16)
+    path = tmp_path / "blank-scaled.fits"
+    hdu = fits.PrimaryHDU(data=raw_data)
+    hdu.header["BLANK"] = blank
+    hdu.header["BSCALE"] = 2.5
+    hdu.header["BZERO"] = -10.0
+    hdu.writeto(path)
+    return path, raw_data, blank
+
+
+def make_compressed_only_fits(tmp_path: Path) -> Path:
+    path = tmp_path / "compressed-only.fits"
+    compressed = fits.CompImageHDU(
+        data=np.zeros((7, 9), dtype=np.int16),
+        name="COMPRESSED",
+    )
+    fits.HDUList([fits.PrimaryHDU(), compressed]).writeto(path)
+    return path
