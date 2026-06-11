@@ -16,7 +16,9 @@ from sqlalchemy import (
     false,
     text,
 )
+from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import TypeDecorator
 
 from app.db.base import Base
 
@@ -25,11 +27,47 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+class UTCDateTime(TypeDecorator[datetime]):
+    impl = DateTime
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect: Dialect) -> Any:
+        return dialect.type_descriptor(DateTime(timezone=dialect.name != "sqlite"))
+
+    def process_bind_param(
+        self,
+        value: datetime | None,
+        dialect: Dialect,
+    ) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("datetime values must be UTC-aware")
+
+        normalized = value.astimezone(UTC)
+        if dialect.name == "sqlite":
+            return normalized.replace(tzinfo=None)
+        return normalized
+
+    def process_result_value(
+        self,
+        value: datetime | None,
+        _dialect: Dialect,
+    ) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+
 def enum_type(enum_class: type[StrEnum]) -> Enum:
     return Enum(
         enum_class,
         name=f"{enum_class.__name__.lower()}_enum",
         native_enum=False,
+        create_constraint=True,
+        validate_strings=True,
         values_callable=lambda members: [member.value for member in members],
     )
 
@@ -82,9 +120,9 @@ class Upload(Base):
     status: Mapped[UploadStatus] = mapped_column(enum_type(UploadStatus), nullable=False)
     validation_result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     selected_hdu: Mapped[int | None] = mapped_column(Integer)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    claimed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     tasks: Mapped[list["Task"]] = relationship(back_populates="upload")
 
 
@@ -121,11 +159,11 @@ class Task(Base):
         default=False,
         server_default=false(),
     )
-    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
+    started_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     upload: Mapped[Upload | None] = relationship(back_populates="tasks")
     source_task: Mapped["Task | None"] = relationship(
         back_populates="derived_tasks",
@@ -140,10 +178,7 @@ class Task(Base):
 
 class TaskEvent(Base):
     __tablename__ = "task_events"
-    __table_args__ = (
-        UniqueConstraint("task_id", "sequence", name="uq_task_event_sequence"),
-        Index("ix_task_events_task_sequence", "task_id", "sequence"),
-    )
+    __table_args__ = (UniqueConstraint("task_id", "sequence", name="uq_task_event_sequence"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     task_id: Mapped[str] = mapped_column(
@@ -158,7 +193,7 @@ class TaskEvent(Base):
         default=dict,
         server_default=text("'{}'"),
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
     task: Mapped[Task] = relationship(back_populates="events")
 
 

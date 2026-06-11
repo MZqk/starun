@@ -17,7 +17,13 @@ depends_on: str | Sequence[str] | None = None
 
 
 def _enum(name: str, *values: str) -> sa.Enum:
-    return sa.Enum(*values, name=name, native_enum=False)
+    return sa.Enum(
+        *values,
+        name=name,
+        native_enum=False,
+        create_constraint=True,
+        validate_strings=True,
+    )
 
 
 def upgrade() -> None:
@@ -134,13 +140,6 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("task_id", "sequence", name="uq_task_event_sequence"),
     )
-    op.create_index(
-        "ix_task_events_task_sequence",
-        "task_events",
-        ["task_id", "sequence"],
-        unique=False,
-    )
-
     op.create_table(
         "daily_usage",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
@@ -160,7 +159,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("daily_usage")
-    op.drop_index("ix_task_events_task_sequence", table_name="task_events")
     op.drop_table("task_events")
     op.drop_index("ix_tasks_expires_at", table_name="tasks")
     op.drop_index("ix_tasks_status_created_at", table_name="tasks")

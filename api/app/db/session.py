@@ -4,6 +4,8 @@ from typing import Any
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.config import Settings
+
 
 def create_engine_and_session(database_url: str) -> tuple[Engine, sessionmaker[Session]]:
     is_sqlite = database_url.startswith("sqlite")
@@ -24,12 +26,23 @@ def create_engine_and_session(database_url: str) -> tuple[Engine, sessionmaker[S
     return engine, session_factory
 
 
-def get_db_session() -> Generator[Session, None, None]:
-    from app.config import Settings
+_application_engine, _application_session_factory = create_engine_and_session(
+    Settings().database_url
+)
 
-    engine, session_factory = create_engine_and_session(Settings().database_url)
-    try:
-        with session_factory() as session:
-            yield session
-    finally:
-        engine.dispose()
+
+def configure_database(database_url: str) -> Engine:
+    """Replace the application engine during startup or isolated tests."""
+    global _application_engine, _application_session_factory
+
+    engine, session_factory = create_engine_and_session(database_url)
+    previous_engine = _application_engine
+    _application_engine = engine
+    _application_session_factory = session_factory
+    previous_engine.dispose()
+    return engine
+
+
+def get_db_session() -> Generator[Session, None, None]:
+    with _application_session_factory() as session:
+        yield session
