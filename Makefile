@@ -2,7 +2,7 @@
 
 install:
 	cd api && uv sync --extra dev
-	cd web && npm install
+	cd web && npm ci
 
 dev:
 	docker compose up --build
