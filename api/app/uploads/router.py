@@ -9,7 +9,6 @@ from app.db.session import get_db_session
 from app.uploads.errors import (
     UploadError,
     missing_client_id_error,
-    upload_too_large_error,
 )
 from app.uploads.schemas import UploadErrorResponse, UploadResponse
 from app.uploads.service import (
@@ -52,20 +51,15 @@ async def create_upload(
         await file.close()
         return _error_response(missing_client_id_error())
 
-    content_length = request.headers.get("content-length")
-    if content_length is not None:
-        try:
-            request_bytes = int(content_length)
-        except ValueError:
-            request_bytes = 0
-        if request_bytes > settings.max_upload_bytes + 2 * 1024 * 1024:
-            await file.close()
-            return _error_response(upload_too_large_error())
-
     request_ip = request.client.host if request.client is not None else ""
     service = UploadService(session, settings, inspector, disk_usage)
     try:
-        upload, inspection = await service.create(file, client_id, request_ip)
+        upload, inspection = await service.create(
+            file,
+            client_id,
+            request_ip,
+            declared_size_bytes=file.size,
+        )
     except UploadError as exc:
         return _error_response(exc)
     return UploadResponse(

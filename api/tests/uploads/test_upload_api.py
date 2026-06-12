@@ -1,6 +1,6 @@
 import hashlib
 from collections import namedtuple
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -248,27 +248,33 @@ def test_client_and_ip_are_hashed_without_persisting_originals(
     assert row.ip_hash not in response.text
 
 
-def test_expiry_is_exactly_one_hour_and_timezone_aware(
-    client: TestClient,
-    headers: dict[str, str],
+@pytest.mark.asyncio
+async def test_ready_expiry_is_one_hour_after_validation_completion(
+    settings: Settings,
     db_session: Session,
     tmp_path: Path,
 ) -> None:
-    before = datetime.now(UTC)
-    response = upload(
-        client,
-        make_fits(tmp_path, np.ones((2, 2), dtype=np.int16)),
-        headers=headers,
-    )
-    after = datetime.now(UTC)
+    upload_started_at = datetime(2026, 6, 12, 8, 0, tzinfo=UTC)
+    validation_completed_at = upload_started_at + timedelta(minutes=15)
+    times = iter([upload_started_at, validation_completed_at])
+    source = make_fits(tmp_path, np.ones((2, 2), dtype=np.int16))
+    file = UploadFile(source.open("rb"), filename="image.fits")
 
-    assert response.status_code == 201
-    row = db_session.get(Upload, response.json()["upload_id"])
-    assert row is not None
+    row, _inspection = await UploadService(
+        db_session,
+        settings,
+        clock=lambda: next(times),
+    ).create(
+        file,
+        "client",
+        "127.0.0.1",
+    )
+
+    assert row.status is UploadStatus.READY
     assert row.created_at.tzinfo is not None
     assert row.expires_at.tzinfo is not None
-    assert row.expires_at.timestamp() - row.created_at.timestamp() == 3600
-    assert before <= row.created_at <= after
+    assert row.created_at == upload_started_at
+    assert row.expires_at == validation_completed_at + timedelta(hours=1)
 
 
 def test_disk_low_before_upload_returns_507_without_row(
@@ -290,6 +296,37 @@ def test_disk_low_before_upload_returns_507_without_row(
         app.dependency_overrides.pop(get_disk_usage, None)
 
     assert_error(response, 507, "insufficient_storage")
+    assert db_session.scalar(select(func.count()).select_from(Upload)) == 0
+
+
+@pytest.mark.asyncio
+async def test_declared_file_size_is_included_in_initial_disk_requirement(
+    settings: Settings,
+    db_session: Session,
+) -> None:
+    declared_size_bytes = 2 * CHUNK_SIZE
+    settings.max_upload_bytes = 3 * CHUNK_SIZE
+    settings.min_free_disk_bytes = 100
+
+    def disk_usage(_path: Path) -> Any:
+        return DiskUsage(
+            4 * CHUNK_SIZE,
+            0,
+            settings.min_free_disk_bytes + declared_size_bytes - 1,
+        )
+
+    file = UploadFile(BytesIO(b"small"), filename="image.fits")
+
+    with pytest.raises(UploadError) as exc_info:
+        await UploadService(db_session, settings, disk_usage=disk_usage).create(
+            file,
+            "client",
+            "127.0.0.1",
+            declared_size_bytes=declared_size_bytes,
+        )
+
+    assert exc_info.value.status_code == 507
+    assert exc_info.value.error_code == "insufficient_storage"
     assert db_session.scalar(select(func.count()).select_from(Upload)) == 0
 
 

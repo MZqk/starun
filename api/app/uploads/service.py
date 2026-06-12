@@ -27,6 +27,7 @@ SUPPORTED_EXTENSIONS = {".fits", ".fit", ".fts"}
 
 Inspector = Callable[[Path], FitsInspection]
 DiskUsage = Callable[[Path], shutil._ntuple_diskusage]
+Clock = Callable[[], datetime]
 
 
 def get_settings() -> Settings:
@@ -39,6 +40,10 @@ def get_inspector() -> Inspector:
 
 def get_disk_usage() -> DiskUsage:
     return shutil.disk_usage
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 def _hash(value: str) -> str:
@@ -68,17 +73,21 @@ class UploadService:
         settings: Settings,
         inspector: Inspector = inspect_fits,
         disk_usage: DiskUsage = shutil.disk_usage,
+        clock: Clock = _utc_now,
     ) -> None:
         self.session = session
         self.settings = settings
         self.inspector = inspector
         self.disk_usage = disk_usage
+        self.clock = clock
 
     async def create(
         self,
         file: UploadFile,
         client_id: str,
         request_ip: str,
+        *,
+        declared_size_bytes: int | None = None,
     ) -> tuple[Upload, FitsInspection]:
         upload: Upload | None = None
         upload_dir: Path | None = None
@@ -87,9 +96,14 @@ class UploadService:
             if extension not in SUPPORTED_EXTENSIONS:
                 raise unsupported_extension_error()
 
-            self._ensure_disk_space(min(self.settings.max_upload_bytes, CHUNK_SIZE))
+            initial_reservation = (
+                declared_size_bytes
+                if declared_size_bytes is not None and declared_size_bytes >= 0
+                else min(self.settings.max_upload_bytes, CHUNK_SIZE)
+            )
+            self._ensure_disk_space(initial_reservation)
 
-            now = datetime.now(UTC)
+            now = self.clock()
             upload_id = secrets.token_urlsafe(24)
             upload_dir = self.settings.data_root / "uploads" / upload_id
             stored_path = upload_dir / f"input{extension}"
@@ -109,6 +123,12 @@ class UploadService:
             self.session.add(upload)
             self.session.commit()
 
+            if (
+                declared_size_bytes is not None
+                and declared_size_bytes > self.settings.max_upload_bytes
+            ):
+                raise upload_too_large_error()
+
             upload_dir.mkdir(parents=True)
             size_bytes = await self._stream(file, stored_path)
 
@@ -120,6 +140,7 @@ class UploadService:
             upload.status = UploadStatus.READY
             upload.validation_result = inspection.model_dump(mode="json")
             upload.selected_hdu = inspection.selected_hdu.index
+            upload.expires_at = self.clock() + timedelta(hours=1)
             self.session.commit()
             return upload, inspection
         except FitsInspectionError as exc:
