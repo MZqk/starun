@@ -108,6 +108,7 @@ async def test_mock_agent_is_byte_deterministic(
     first = await build_runner(first_context).run(first_context)
     second = await build_runner(second_context).run(second_context)
 
+    assert first.model_dump_json() == second.model_dump_json()
     assert first.plan == second.plan
     assert first.quality_score == second.quality_score
     assert [artifact.name for artifact in first.artifacts] == EXPECTED_ARTIFACTS
@@ -118,6 +119,16 @@ async def test_mock_agent_is_byte_deterministic(
         assert (first_context.task_dir / name).read_bytes() == (
             second_context.task_dir / name
         ).read_bytes()
+    first_timestamps = [event.timestamp for event in first.events]
+    second_timestamps = [event.timestamp for event in second.events]
+    assert all(timestamp is not None for timestamp in first_timestamps)
+    assert first_timestamps == second_timestamps
+    assert first_timestamps == sorted(first_timestamps)
+    assert len(set(first_timestamps)) == len(first_timestamps)
+    assert all(
+        timestamp is not None and timestamp.utcoffset().total_seconds() == 0
+        for timestamp in first_timestamps
+    )
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
+import hashlib
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -19,6 +20,7 @@ from app.artifacts.store import ArtifactPathError, ArtifactStore
 
 MAX_STEPS = 12
 MAX_ITERATIONS = 2
+EventTimestampProvider = Callable[[TaskContext, int], datetime]
 
 
 class AgentGuardrailError(ValueError):
@@ -41,12 +43,14 @@ class AgentRunner:
         model: ModelAdapter,
         registry: ToolRegistry,
         artifact_store: ArtifactStore,
-        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        event_timestamp_provider: EventTimestampProvider | None = None,
     ) -> None:
         self._model = model
         self._registry = registry
         self._artifact_store = artifact_store
-        self._clock = clock
+        self._event_timestamp_provider = (
+            event_timestamp_provider or deterministic_event_timestamp
+        )
 
     async def run(self, context: TaskContext) -> AgentRunResult:
         self._validate_context_paths(context)
@@ -55,6 +59,7 @@ class AgentRunner:
         prepared = self._prepare_steps(plan)
         events: list[AgentEvent] = []
         self._event(
+            context,
             events,
             "plan",
             {
@@ -67,6 +72,7 @@ class AgentRunner:
         for step, tool, arguments in prepared:
             self._check_cancelled(context)
             self._event(
+                context,
                 events,
                 "tool_started",
                 {
@@ -84,6 +90,7 @@ class AgentRunner:
                 name: value for name, value in result.metrics.items()
             }
             self._event(
+                context,
                 events,
                 "tool_finished",
                 {
@@ -94,8 +101,14 @@ class AgentRunner:
                 },
             )
         quality_score = await self._model.evaluate(combined)
-        self._event(events, "evaluation", {"quality_score": quality_score})
         self._event(
+            context,
+            events,
+            "evaluation",
+            {"quality_score": quality_score},
+        )
+        self._event(
+            context,
             events,
             "completion",
             {
@@ -157,15 +170,25 @@ class AgentRunner:
 
     def _event(
         self,
+        context: TaskContext,
         events: list[AgentEvent],
         event_type: str,
         payload: dict[str, JsonValue],
     ) -> None:
+        sequence = len(events) + 1
         events.append(
             AgentEvent(
-                sequence=len(events) + 1,
+                sequence=sequence,
                 event_type=event_type,  # type: ignore[arg-type]
                 payload=payload,
-                timestamp=self._clock(),
+                timestamp=self._event_timestamp_provider(context, sequence),
             )
         )
+
+
+def deterministic_event_timestamp(context: TaskContext, sequence: int) -> datetime:
+    style = context.style.value if context.style is not None else ""
+    digest = hashlib.sha256(f"{context.task_id}{style}".encode()).digest()
+    seconds = int.from_bytes(digest[:4], "big")
+    base = datetime(2000, 1, 1, tzinfo=UTC) + timedelta(seconds=seconds)
+    return base + timedelta(microseconds=sequence)
