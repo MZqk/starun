@@ -1,19 +1,20 @@
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Annotated, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.artifacts.contracts import (
+    ArtifactManifestEntry as ArtifactManifestEntry,
+    JsonValue as JsonValue,
+)
 from app.db.models import ProcessingStyle, TaskType
 from app.fits.schemas import FitsInspection
 
-type JsonPrimitive = str | int | float | bool | None
-type JsonValue = JsonPrimitive | list[JsonValue] | dict[str, JsonValue]
-
 
 class TaskContext(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", strict=True)
 
     task_id: str
     task_type: TaskType
@@ -26,7 +27,7 @@ class TaskContext(BaseModel):
 
 
 class AgentStep(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     id: str
     tool_name: str
@@ -35,33 +36,32 @@ class AgentStep(BaseModel):
 
 
 class AgentPlan(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     version: Literal["1"]
     steps: list[AgentStep]
-    max_iterations: int = Field(ge=1, le=2)
+    max_iterations: int = Field(ge=1, le=2, strict=True)
 
-
-class ArtifactManifestEntry(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    media_type: str
-    size: int = Field(ge=0)
-    sha256: str
-    demo: Literal[True] = True
-
+    @model_validator(mode="after")
+    def validate_unique_step_ids(self) -> "AgentPlan":
+        step_ids = [step.id for step in self.steps]
+        if len(step_ids) != len(set(step_ids)):
+            raise ValueError("agent step ids must be unique")
+        return self
 
 class ToolResult(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     observations: dict[str, JsonValue] = Field(default_factory=dict)
     artifacts: list[ArtifactManifestEntry] = Field(default_factory=list)
-    metrics: dict[str, float] = Field(default_factory=dict)
+    metrics: dict[
+        str,
+        Annotated[float, Field(allow_inf_nan=False, strict=True)],
+    ] = Field(default_factory=dict)
 
 
 class AgentEvent(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     sequence: int = Field(ge=1)
     event_type: Literal[
@@ -76,7 +76,7 @@ class AgentEvent(BaseModel):
 
 
 class AgentRunResult(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     plan: AgentPlan
     quality_score: float = Field(ge=0.0, le=1.0)

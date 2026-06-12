@@ -13,29 +13,29 @@ WATERMARK = "STARUN MOCK / 演示结果"
 
 
 class NoArguments(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class StrengthArguments(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     strength: float = Field(ge=0.0, le=2.0)
 
 
 class ColorArguments(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     saturation: float = Field(ge=0.0, le=2.0)
 
 
 class EvaluateArguments(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     seed: int = Field(ge=0)
 
 
 class ExportArguments(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     seed: int = Field(ge=0)
     style: str = Field(pattern="^(realistic|balanced|artistic)$")
@@ -98,19 +98,28 @@ class _ExportTool:
         del context
         validated = ExportArguments.model_validate(arguments)
         image = _demo_image(validated.seed, validated.style)
-        tiff = self._store.write_bytes("result-demo.tiff", _encode_tiff(image))
-        png = self._store.write_bytes("preview-demo.png", _encode_png(image))
-        manifest = self._store.write_json(
-            "manifest.json",
-            {
-                "artifacts": [
-                    tiff.model_dump(mode="json"),
-                    png.model_dump(mode="json"),
-                ],
-                "demo": True,
-                "notice": WATERMARK,
-            },
-        )
+        names = ["result-demo.tiff", "preview-demo.png", "manifest.json"]
+        previous = {
+            name: self._store.read_bytes(name) if self._store.exists(name) else None
+            for name in names
+        }
+        try:
+            tiff = self._store.write_bytes("result-demo.tiff", _encode_tiff(image))
+            png = self._store.write_bytes("preview-demo.png", _encode_png(image))
+            manifest = self._store.write_json(
+                "manifest.json",
+                {
+                    "artifacts": [
+                        tiff.model_dump(mode="json"),
+                        png.model_dump(mode="json"),
+                    ],
+                    "demo": True,
+                    "notice": WATERMARK,
+                },
+            )
+        except BaseException:
+            self._rollback(names, previous)
+            raise
         return ToolResult(
             observations={
                 "export": "bounded synthetic preview",
@@ -118,6 +127,17 @@ class _ExportTool:
             },
             artifacts=[tiff, png, manifest],
         )
+
+    def _rollback(
+        self,
+        names: list[str],
+        previous: dict[str, bytes | None],
+    ) -> None:
+        self._store.delete_many(names)
+        for name in names:
+            data = previous[name]
+            if data is not None:
+                self._store.write_bytes(name, data)
 
 
 def build_mock_tools(store: ArtifactStore) -> list[_ObservationTool | _EvaluateTool | _ExportTool]:
@@ -210,7 +230,6 @@ def _encode_tiff(image: Image.Image) -> bytes:
     output = BytesIO()
     metadata = TiffImagePlugin.ImageFileDirectory_v2()
     metadata[270] = "STARUN MOCK / DEMO RESULT"
-    metadata[700] = WATERMARK.encode("utf-8")
     image.save(
         output,
         format="TIFF",

@@ -1,6 +1,7 @@
-import hashlib
+import json
+import math
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -20,7 +21,9 @@ from app.artifacts.store import ArtifactPathError, ArtifactStore
 
 MAX_STEPS = 12
 MAX_ITERATIONS = 2
-EventTimestampProvider = Callable[[TaskContext, int], datetime]
+MAX_ARTIFACT_COUNT = 16
+MAX_OBSERVATION_JSON_BYTES = 64 * 1024
+OccurrenceTimestampProvider = Callable[[TaskContext, int], datetime]
 
 
 class AgentGuardrailError(ValueError):
@@ -28,6 +31,10 @@ class AgentGuardrailError(ValueError):
 
 
 class InvalidToolArgumentsError(AgentGuardrailError):
+    pass
+
+
+class AgentOutputError(AgentGuardrailError):
     pass
 
 
@@ -43,21 +50,25 @@ class AgentRunner:
         model: ModelAdapter,
         registry: ToolRegistry,
         artifact_store: ArtifactStore,
-        event_timestamp_provider: EventTimestampProvider | None = None,
+        occurrence_timestamp_provider: OccurrenceTimestampProvider | None = None,
     ) -> None:
         self._model = model
         self._registry = registry
         self._artifact_store = artifact_store
-        self._event_timestamp_provider = (
-            event_timestamp_provider or deterministic_event_timestamp
+        self._occurrence_timestamp_provider = (
+            occurrence_timestamp_provider or utc_occurrence_timestamp
         )
 
     async def run(self, context: TaskContext) -> AgentRunResult:
         self._validate_context_paths(context)
+        self._check_cancelled(context)
         raw_plan = await self._model.plan(context)
+        self._check_cancelled(context)
         plan = self._validate_plan(raw_plan)
         prepared = self._prepare_steps(plan)
         events: list[AgentEvent] = []
+        artifact_names: set[str] = set()
+        observation_json_bytes = 0
         self._event(
             context,
             events,
@@ -81,8 +92,13 @@ class AgentRunner:
                     "tool_version": step.tool_version,
                 },
             )
-            result = await tool.execute(context, arguments)
+            raw_result = await tool.execute(context, arguments)
             self._check_cancelled(context)
+            result = self._validate_tool_result(raw_result)
+            observation_json_bytes += self._serialized_json_size(result.observations)
+            if observation_json_bytes > MAX_OBSERVATION_JSON_BYTES:
+                raise AgentOutputError("agent observations exceed maximum serialized size")
+            self._verify_artifacts(result, artifact_names)
             combined.observations[step.id] = result.observations
             combined.artifacts.extend(result.artifacts)
             combined.metrics.update(result.metrics)
@@ -100,7 +116,16 @@ class AgentRunner:
                     "metrics": event_metrics,
                 },
             )
+        self._check_cancelled(context)
         quality_score = await self._model.evaluate(combined)
+        self._check_cancelled(context)
+        if (
+            isinstance(quality_score, bool)
+            or not isinstance(quality_score, float)
+            or not math.isfinite(quality_score)
+            or not 0.0 <= quality_score <= 1.0
+        ):
+            raise AgentOutputError("model evaluation returned an invalid quality score")
         self._event(
             context,
             events,
@@ -129,7 +154,8 @@ class AgentRunner:
 
     def _validate_plan(self, raw_plan: Any) -> AgentPlan:
         try:
-            plan = AgentPlan.model_validate(raw_plan)
+            candidate = raw_plan.model_dump() if isinstance(raw_plan, AgentPlan) else raw_plan
+            plan = AgentPlan.model_validate(candidate, strict=True)
         except ValidationError as exc:
             raise AgentGuardrailError("invalid agent plan") from exc
         if len(plan.steps) > MAX_STEPS:
@@ -146,7 +172,7 @@ class AgentRunner:
         for step in plan.steps:
             tool = self._registry.resolve(step.tool_name, step.tool_version)
             try:
-                arguments = tool.input_model.model_validate(step.arguments)
+                arguments = tool.input_model.model_validate(step.arguments, strict=True)
             except ValidationError as exc:
                 raise InvalidToolArgumentsError(
                     f"invalid arguments for {step.tool_name}@{step.tool_version}"
@@ -154,11 +180,45 @@ class AgentRunner:
             prepared.append((step, tool, arguments))
         return prepared
 
+    def _validate_tool_result(self, raw_result: ToolResult) -> ToolResult:
+        try:
+            return ToolResult.model_validate(raw_result.model_dump(), strict=True)
+        except (AttributeError, ValidationError) as exc:
+            raise AgentOutputError("tool returned an invalid result") from exc
+
+    def _verify_artifacts(
+        self,
+        result: ToolResult,
+        artifact_names: set[str],
+    ) -> None:
+        if len(artifact_names) + len(result.artifacts) > MAX_ARTIFACT_COUNT:
+            raise AgentOutputError("agent produced too many artifacts")
+        for claimed in result.artifacts:
+            if claimed.name in artifact_names:
+                raise AgentOutputError("agent produced duplicate artifact names")
+            try:
+                actual = self._artifact_store.describe(claimed.name)
+            except (FileNotFoundError, OSError, ValueError) as exc:
+                raise AgentOutputError("tool claimed an invalid or missing artifact") from exc
+            if actual != claimed:
+                raise AgentOutputError("tool artifact claim does not match stored bytes")
+            artifact_names.add(claimed.name)
+
+    def _serialized_json_size(self, value: dict[str, JsonValue]) -> int:
+        return len(
+            json.dumps(
+                value,
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+
     def _validate_context_paths(self, context: TaskContext) -> None:
         try:
             task_dir = context.task_dir.resolve(strict=True)
             source_path = context.source_path.resolve(strict=True)
-            if task_dir != self._artifact_store.root:
+            if not self._artifact_store.matches_root(context.task_dir):
                 raise ValueError
             source_path.relative_to(task_dir)
         except (FileNotFoundError, RuntimeError, ValueError) as exc:
@@ -181,14 +241,17 @@ class AgentRunner:
                 sequence=sequence,
                 event_type=event_type,  # type: ignore[arg-type]
                 payload=payload,
-                timestamp=self._event_timestamp_provider(context, sequence),
+                timestamp=self._occurrence_timestamp(context, sequence),
             )
         )
 
+    def _occurrence_timestamp(self, context: TaskContext, sequence: int) -> datetime:
+        timestamp = self._occurrence_timestamp_provider(context, sequence)
+        if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+            raise AgentOutputError("occurrence timestamp must be timezone-aware")
+        return timestamp.astimezone(UTC)
 
-def deterministic_event_timestamp(context: TaskContext, sequence: int) -> datetime:
-    style = context.style.value if context.style is not None else ""
-    digest = hashlib.sha256(f"{context.task_id}{style}".encode()).digest()
-    seconds = int.from_bytes(digest[:4], "big")
-    base = datetime(2000, 1, 1, tzinfo=UTC) + timedelta(seconds=seconds)
-    return base + timedelta(microseconds=sequence)
+
+def utc_occurrence_timestamp(_context: TaskContext, _sequence: int) -> datetime:
+    """Return the real UTC time at which an Agent event occurs."""
+    return datetime.now(UTC)

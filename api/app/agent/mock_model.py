@@ -1,4 +1,5 @@
 import hashlib
+from datetime import UTC, datetime, timedelta
 
 from app.agent.contracts import AgentPlan, AgentStep, JsonValue, TaskContext, ToolResult
 from app.db.models import ProcessingStyle
@@ -43,6 +44,16 @@ class DeterministicMockModel:
 def _seed(task_id: str, style: ProcessingStyle) -> int:
     digest = hashlib.sha256(f"{task_id}{style.value}".encode()).digest()
     return int.from_bytes(digest[:8], "big")
+
+
+def deterministic_mock_occurrence_timestamp(
+    context: TaskContext,
+    sequence: int,
+) -> datetime:
+    style = context.style or ProcessingStyle.BALANCED
+    seconds = _seed(context.task_id, style) % (50 * 365 * 24 * 60 * 60)
+    base = datetime(2000, 1, 1, tzinfo=UTC) + timedelta(seconds=seconds)
+    return base + timedelta(microseconds=sequence)
 
 
 def _step(identifier: str, name: str, arguments: dict[str, JsonValue]) -> AgentStep:
