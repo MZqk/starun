@@ -9,12 +9,14 @@ class UploadError(Exception):
         message: str,
         *,
         diagnostic_id: str | None = None,
+        retryable: bool = False,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.error_code = error_code
         self.message = message
         self.diagnostic_id = diagnostic_id
+        self.retryable = retryable
 
 
 class UnexpectedUploadError(UploadError):
@@ -48,4 +50,5 @@ def insufficient_storage_error() -> UploadError:
         507,
         "insufficient_storage",
         "There is not enough storage available for this upload.",
+        retryable=True,
     )

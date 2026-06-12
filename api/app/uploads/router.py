@@ -28,6 +28,7 @@ def _error_response(error: UploadError) -> JSONResponse:
         error_code=error.error_code,
         message=error.message,
         diagnostic_id=error.diagnostic_id,
+        retryable=error.retryable,
     )
     return JSONResponse(status_code=error.status_code, content=body.model_dump(mode="json"))
 
@@ -36,7 +37,10 @@ def _error_response(error: UploadError) -> JSONResponse:
     "",
     response_model=UploadResponse,
     status_code=201,
-    responses={400: {"model": UploadErrorResponse}, 413: {"model": UploadErrorResponse}},
+    responses={
+        status: {"model": UploadErrorResponse}
+        for status in (400, 413, 415, 422, 500, 507)
+    },
 )
 async def create_upload(
     request: Request,

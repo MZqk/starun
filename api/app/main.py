@@ -1,8 +1,10 @@
 from fastapi import FastAPI
 
+from app.uploads.middleware import UploadRequestGuardMiddleware
 from app.uploads.router import router as uploads_router
 
 app = FastAPI(title="Starun API")
+app.add_middleware(UploadRequestGuardMiddleware)
 app.include_router(uploads_router)
 
 

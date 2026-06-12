@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import secrets
 import shutil
 from collections.abc import Callable
@@ -28,6 +29,7 @@ SUPPORTED_EXTENSIONS = {".fits", ".fit", ".fts"}
 Inspector = Callable[[Path], FitsInspection]
 DiskUsage = Callable[[Path], shutil._ntuple_diskusage]
 Clock = Callable[[], datetime]
+logger = logging.getLogger(__name__)
 
 
 def get_settings() -> Settings:
@@ -96,6 +98,12 @@ class UploadService:
             if extension not in SUPPORTED_EXTENSIONS:
                 raise unsupported_extension_error()
 
+            if (
+                declared_size_bytes is not None
+                and declared_size_bytes > self.settings.max_upload_bytes
+            ):
+                raise upload_too_large_error()
+
             initial_reservation = (
                 declared_size_bytes
                 if declared_size_bytes is not None and declared_size_bytes >= 0
@@ -123,12 +131,6 @@ class UploadService:
             self.session.add(upload)
             self.session.commit()
 
-            if (
-                declared_size_bytes is not None
-                and declared_size_bytes > self.settings.max_upload_bytes
-            ):
-                raise upload_too_large_error()
-
             upload_dir.mkdir(parents=True)
             size_bytes = await self._stream(file, stored_path)
 
@@ -145,18 +147,18 @@ class UploadService:
             return upload, inspection
         except FitsInspectionError as exc:
             if upload is not None:
-                self._invalidate(upload, exc.error_code)
-                self._remove_upload_dir(upload_dir)
+                cleanup_result = self._remove_upload_dir(upload_dir)
+                self._invalidate(upload, exc.error_code, cleanup_result)
             raise UploadError(422, exc.error_code, str(exc)) from exc
         except UploadError as exc:
             if upload is not None:
-                self._invalidate(upload, exc.error_code)
-                self._remove_upload_dir(upload_dir)
+                cleanup_result = self._remove_upload_dir(upload_dir)
+                self._invalidate(upload, exc.error_code, cleanup_result)
             raise
         except BaseException as exc:
             if upload is not None:
-                self._invalidate(upload, "internal_error")
-                self._remove_upload_dir(upload_dir)
+                cleanup_result = self._remove_upload_dir(upload_dir)
+                self._invalidate(upload, "internal_error", cleanup_result)
             if isinstance(exc, Exception):
                 raise UnexpectedUploadError() from exc
             raise
@@ -185,16 +187,53 @@ class UploadService:
         if free_bytes < required:
             raise insufficient_storage_error()
 
-    def _invalidate(self, upload: Upload, error_code: str) -> None:
+    def _invalidate(
+        self,
+        upload: Upload,
+        error_code: str,
+        cleanup_result: dict[str, object] | None = None,
+    ) -> None:
+        validation_result: dict[str, object] = {"error_code": error_code}
+        if cleanup_result is not None:
+            validation_result.update(cleanup_result)
+
+        def mark_invalid(row: Upload) -> None:
+            row.status = UploadStatus.INVALID
+            row.validation_result = validation_result
+            row.selected_hdu = None
+
         try:
-            upload.status = UploadStatus.INVALID
-            upload.validation_result = {"error_code": error_code}
-            upload.selected_hdu = None
+            mark_invalid(upload)
             self.session.commit()
         except Exception:
+            logger.exception("Failed to persist terminal upload state; retrying")
             self.session.rollback()
+            try:
+                recovered = self.session.get(Upload, upload.id)
+                if recovered is None:
+                    recovered = self.session.merge(upload)
+                mark_invalid(recovered)
+                self.session.commit()
+            except Exception:
+                logger.exception("Failed to persist terminal upload state after rollback")
+                self.session.rollback()
 
     @staticmethod
-    def _remove_upload_dir(upload_dir: Path | None) -> None:
-        if upload_dir is not None:
-            shutil.rmtree(upload_dir, ignore_errors=True)
+    def _remove_upload_dir(upload_dir: Path | None) -> dict[str, object] | None:
+        if upload_dir is None:
+            return None
+        try:
+            shutil.rmtree(upload_dir)
+        except FileNotFoundError:
+            return None
+        except Exception:
+            diagnostic_id = secrets.token_urlsafe(12)
+            logger.exception(
+                "Upload cleanup failed; diagnostic_id=%s",
+                diagnostic_id,
+            )
+            return {
+                "cleanup_pending": True,
+                "cleanup_diagnostic_id": diagnostic_id,
+            }
+        return None

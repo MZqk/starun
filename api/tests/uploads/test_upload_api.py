@@ -1,9 +1,10 @@
 import hashlib
+import json
 from collections import namedtuple
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -11,11 +12,12 @@ from fastapi import UploadFile
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from starlette.types import Message, Receive, Scope, Send
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.config import Settings
 from app.db.models import DailyUsage, Task, Upload, UploadStatus
-from app.uploads.errors import UploadError
+from app.uploads.errors import UploadError, upload_too_large_error
 from app.uploads.service import (
     CHUNK_SIZE,
     UploadService,
@@ -47,12 +49,18 @@ def upload(
         )
 
 
-def assert_error(response: Any, status: int, error_code: str) -> None:
+def assert_error(
+    response: Any,
+    status: int,
+    error_code: str,
+    *,
+    retryable: bool = False,
+) -> None:
     assert response.status_code == status
     assert response.json() == {
         "error_code": error_code,
         "message": response.json()["message"],
-        "retryable": False,
+        "retryable": retryable,
         "quota_charged": False,
         "diagnostic_id": response.json()["diagnostic_id"],
     }
@@ -61,6 +69,67 @@ def assert_error(response: Any, status: int, error_code: str) -> None:
 def assert_no_usage_or_tasks(session: Session) -> None:
     assert session.scalar(select(func.count()).select_from(Task)) == 0
     assert session.scalar(select(func.count()).select_from(DailyUsage)) == 0
+
+
+async def send_chunked_asgi_request(
+    body: bytes,
+    *,
+    chunk_size: int,
+) -> tuple[int, dict[str, Any]]:
+    messages = [
+        {
+            "type": "http.request",
+            "body": body[offset : offset + chunk_size],
+            "more_body": offset + chunk_size < len(body),
+        }
+        for offset in range(0, len(body), chunk_size)
+    ]
+    sent: list[Message] = []
+    scope = cast(
+        Scope,
+        {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/api/uploads",
+            "raw_path": b"/api/uploads",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [
+                (b"content-type", b"multipart/form-data; boundary=starun-boundary"),
+                (b"x-starun-client-id", b"test-client"),
+            ],
+            "client": ("testclient", 123),
+            "server": ("testserver", 80),
+        },
+    )
+
+    async def receive() -> Message:
+        return cast(Message, messages.pop(0))
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    await app(scope, cast(Receive, receive), cast(Send, send))
+    start = next(message for message in sent if message["type"] == "http.response.start")
+    response_body = b"".join(
+        message.get("body", b"")
+        for message in sent
+        if message["type"] == "http.response.body"
+    )
+    return start["status"], cast(dict[str, Any], json.loads(response_body))
+
+
+def multipart_body(file_bytes: bytes) -> bytes:
+    return (
+        b"--starun-boundary\r\n"
+        b'Content-Disposition: form-data; name="file"; filename="image.fits"\r\n'
+        b"Content-Type: application/octet-stream\r\n\r\n"
+        + file_bytes
+        + b"\r\n--starun-boundary--\r\n"
+    )
 
 
 def test_valid_fits_is_streamed_inspected_and_persisted_ready(
@@ -137,7 +206,7 @@ def test_bad_extension_is_rejected_before_row_or_file(
     assert list((data_root / "uploads").glob("**/*")) == []
 
 
-def test_exact_max_is_accepted_and_max_plus_one_is_cleaned_up(
+def test_exact_max_is_accepted_and_declared_max_plus_one_is_rejected(
     client: TestClient,
     headers: dict[str, str],
     db_session: Session,
@@ -153,8 +222,61 @@ def test_exact_max_is_accepted_and_max_plus_one_is_cleaned_up(
     rejected = upload(client, source, headers=headers)
     assert_error(rejected, 413, "upload_too_large")
     rows = db_session.scalars(select(Upload).order_by(Upload.created_at)).all()
-    assert [row.status for row in rows] == [UploadStatus.READY, UploadStatus.INVALID]
-    assert not Path(rows[1].stored_path).parent.exists()
+    assert [row.status for row in rows] == [UploadStatus.READY]
+
+
+@pytest.mark.asyncio
+async def test_chunked_oversized_request_is_rejected_before_route(
+    client: TestClient,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings.max_upload_bytes = 16
+    route_reached = False
+
+    async def fail_if_route_reached(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal route_reached
+        route_reached = True
+        raise AssertionError("upload route reached")
+
+    monkeypatch.setattr(UploadService, "create", fail_if_route_reached)
+    body = multipart_body(b"x" * (settings.max_upload_bytes + 1024 * 1024 + 1))
+
+    status, response = await send_chunked_asgi_request(body, chunk_size=64 * 1024)
+
+    assert status == 413
+    assert response["error_code"] == "upload_too_large"
+    assert route_reached is False
+
+
+@pytest.mark.asyncio
+async def test_request_is_rejected_before_parser_when_disk_reserve_is_low(
+    client: TestClient,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings.min_free_disk_bytes = 100
+    route_reached = False
+
+    async def fail_if_route_reached(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal route_reached
+        route_reached = True
+        raise AssertionError("upload route reached")
+
+    monkeypatch.setattr(UploadService, "create", fail_if_route_reached)
+    app.dependency_overrides[get_disk_usage] = lambda: lambda _path: DiskUsage(100, 99, 1)
+    try:
+        status, response = await send_chunked_asgi_request(
+            multipart_body(b"small"),
+            chunk_size=8,
+        )
+    finally:
+        app.dependency_overrides.pop(get_disk_usage, None)
+
+    assert status == 507
+    assert response["error_code"] == "insufficient_storage"
+    assert response["retryable"] is True
+    assert route_reached is False
 
 
 class RecordingStream(BytesIO):
@@ -295,7 +417,7 @@ def test_disk_low_before_upload_returns_507_without_row(
     finally:
         app.dependency_overrides.pop(get_disk_usage, None)
 
-    assert_error(response, 507, "insufficient_storage")
+    assert_error(response, 507, "insufficient_storage", retryable=True)
     assert db_session.scalar(select(func.count()).select_from(Upload)) == 0
 
 
@@ -330,7 +452,36 @@ async def test_declared_file_size_is_included_in_initial_disk_requirement(
     assert db_session.scalar(select(func.count()).select_from(Upload)) == 0
 
 
-def test_disk_low_during_upload_cleans_partial_file_and_retains_audit(
+@pytest.mark.asyncio
+async def test_declared_file_size_over_max_is_rejected_before_disk_check(
+    settings: Settings,
+    db_session: Session,
+) -> None:
+    settings.max_upload_bytes = 100
+    disk_checked = False
+
+    def disk_usage(_path: Path) -> Any:
+        nonlocal disk_checked
+        disk_checked = True
+        return DiskUsage(100, 100, 0)
+
+    file = UploadFile(BytesIO(b"small"), filename="image.fits")
+
+    with pytest.raises(UploadError) as exc_info:
+        await UploadService(db_session, settings, disk_usage=disk_usage).create(
+            file,
+            "client",
+            "127.0.0.1",
+            declared_size_bytes=settings.max_upload_bytes + 1,
+        )
+
+    assert exc_info.value.status_code == 413
+    assert exc_info.value.error_code == "upload_too_large"
+    assert disk_checked is False
+    assert db_session.scalar(select(func.count()).select_from(Upload)) == 0
+
+
+def test_disk_low_while_receiving_is_rejected_before_upload_row(
     client: TestClient,
     headers: dict[str, str],
     db_session: Session,
@@ -340,13 +491,15 @@ def test_disk_low_during_upload_cleans_partial_file_and_retains_audit(
 ) -> None:
     settings.max_upload_bytes = 10 * CHUNK_SIZE
     settings.min_free_disk_bytes = 100
-    values = iter(
-        [
-            DiskUsage(2 * CHUNK_SIZE, 0, 2 * CHUNK_SIZE),
-            DiskUsage(2 * CHUNK_SIZE, 2 * CHUNK_SIZE - 50, 50),
-        ]
-    )
-    app.dependency_overrides[get_disk_usage] = lambda: lambda _path: next(values)
+    check_count = 0
+
+    def disk_usage(_path: Path) -> Any:
+        nonlocal check_count
+        check_count += 1
+        free = 2 * CHUNK_SIZE if check_count == 1 else 50
+        return DiskUsage(2 * CHUNK_SIZE, 2 * CHUNK_SIZE - free, free)
+
+    app.dependency_overrides[get_disk_usage] = lambda: disk_usage
     try:
         response = upload(
             client,
@@ -356,10 +509,9 @@ def test_disk_low_during_upload_cleans_partial_file_and_retains_audit(
     finally:
         app.dependency_overrides.pop(get_disk_usage, None)
 
-    assert_error(response, 507, "insufficient_storage")
-    row = db_session.scalar(select(Upload))
-    assert row is not None and row.status is UploadStatus.INVALID
-    assert not (data_root / "uploads" / row.id).exists()
+    assert_error(response, 507, "insufficient_storage", retryable=True)
+    assert db_session.scalar(select(func.count()).select_from(Upload)) == 0
+    assert list((data_root / "uploads").glob("**/*")) == []
 
 
 def test_unexpected_inspector_exception_returns_safe_500_and_cleans_up(
@@ -450,3 +602,86 @@ async def test_read_exception_cleans_files_marks_invalid_and_closes_upload(
     assert row is not None and row.status is UploadStatus.INVALID
     assert not Path(row.stored_path).parent.exists()
     assert stream.closed_by_service is True
+
+
+@pytest.mark.asyncio
+async def test_invalidation_recovers_after_first_terminal_commit_fails(
+    settings: Settings,
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    source = make_fits(tmp_path, np.ones((2, 2), dtype=np.int16))
+    file = UploadFile(source.open("rb"), filename="image.fits")
+    original_commit = db_session.commit
+    commit_count = 0
+
+    def fail_first_invalidation_commit() -> None:
+        nonlocal commit_count
+        commit_count += 1
+        if commit_count == 3:
+            raise RuntimeError("controlled invalidation commit failure")
+        original_commit()
+
+    def invalid_inspector(_path: Path) -> Any:
+        raise upload_too_large_error()
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(db_session, "commit", fail_first_invalidation_commit)
+    try:
+        with pytest.raises(UploadError):
+            await UploadService(
+                db_session,
+                settings,
+                inspector=invalid_inspector,
+            ).create(file, "client", "127.0.0.1")
+    finally:
+        monkeypatch.undo()
+
+    db_session.expire_all()
+    row = db_session.scalar(select(Upload))
+    assert row is not None
+    assert row.status is UploadStatus.INVALID
+    assert row.validation_result == {"error_code": "upload_too_large"}
+
+
+def test_cleanup_failure_keeps_original_error_and_marks_cleanup_pending(
+    client: TestClient,
+    headers: dict[str, str],
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = make_corrupt_fits(tmp_path)
+    logged: list[tuple[str, tuple[Any, ...]]] = []
+
+    def failed_rmtree(_path: Path) -> None:
+        raise OSError("controlled cleanup failure")
+
+    def record_exception(message: str, *args: Any, **_kwargs: Any) -> None:
+        logged.append((message, args))
+
+    monkeypatch.setattr("app.uploads.service.shutil.rmtree", failed_rmtree)
+    monkeypatch.setattr("app.uploads.service.logger.exception", record_exception)
+
+    response = upload(client, source, headers=headers)
+
+    assert_error(response, 422, "invalid_fits")
+    row = db_session.scalar(select(Upload))
+    assert row is not None
+    assert row.status is UploadStatus.INVALID
+    assert row.validation_result is not None
+    assert row.validation_result["error_code"] == "invalid_fits"
+    assert row.validation_result["cleanup_pending"] is True
+    assert row.validation_result["cleanup_diagnostic_id"]
+    assert logged == [
+        (
+            "Upload cleanup failed; diagnostic_id=%s",
+            (row.validation_result["cleanup_diagnostic_id"],),
+        )
+    ]
+
+
+def test_upload_openapi_declares_all_error_responses(client: TestClient) -> None:
+    responses = client.get("/openapi.json").json()["paths"]["/api/uploads"]["post"]["responses"]
+
+    assert {"400", "413", "415", "422", "500", "507"} <= responses.keys()
