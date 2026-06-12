@@ -64,7 +64,10 @@ def _task_response(task: Task) -> TaskResponse:
     "/api/tasks/analysis",
     response_model=TaskResponse,
     status_code=201,
-    responses={status: {"model": TaskErrorResponse} for status in (400, 404, 409, 410, 429)},
+    responses={
+        status: {"model": TaskErrorResponse}
+        for status in (400, 404, 409, 410, 422, 429, 503)
+    },
 )
 def create_analysis_task(
     request: Request,
@@ -90,7 +93,10 @@ def create_analysis_task(
     "/api/tasks/process",
     response_model=TaskResponse,
     status_code=201,
-    responses={status: {"model": TaskErrorResponse} for status in (400, 404, 409, 410, 429)},
+    responses={
+        status: {"model": TaskErrorResponse}
+        for status in (400, 404, 409, 410, 422, 429, 503)
+    },
 )
 def create_processing_task(
     request: Request,

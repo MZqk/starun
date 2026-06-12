@@ -1,13 +1,16 @@
 import hashlib
 import re
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
+from threading import Barrier
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -115,6 +118,14 @@ def _assert_error(
         "retryable": retryable,
         "quota_charged": False,
     }
+
+
+def _sqlite_busy_error() -> OperationalError:
+    return OperationalError(
+        "BEGIN IMMEDIATE",
+        {},
+        sqlite3.OperationalError("database is locked"),
+    )
 
 
 def test_analysis_claims_upload_and_charges_exactly_once(
@@ -320,14 +331,42 @@ def test_processing_defaults_balanced_and_validates_request_shape(
         db_session.get(Task, response.json()["task_id"]).style
         is ProcessingStyle.BALANCED
     )
-    for invalid in (
-        {},
-        {"upload_id": "one", "source_task_id": "two"},
-        {"upload_id": "one", "style": "documentary"},
-        {"upload_id": "one", "extra": True},
-    ):
-        rejected = client.post("/api/tasks/process", headers=headers, json=invalid)
-        assert rejected.status_code == 422
+    rejected = client.post(
+        "/api/tasks/process",
+        headers=headers,
+        json={"upload_id": "one", "extra": True},
+    )
+    _assert_error(rejected, 422, "invalid_request")
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/api/tasks/process", {"upload_id": "one", "style": "documentary"}),
+        ("/api/tasks/process", {}),
+        (
+            "/api/tasks/process",
+            {"upload_id": "one", "source_task_id": "two"},
+        ),
+        ("/api/tasks/analysis", {}),
+        ("/api/tasks/analysis", {"upload_id": 42}),
+    ],
+)
+def test_task_validation_errors_have_stable_safe_format(
+    client: TestClient,
+    headers: dict[str, str],
+    path: str,
+    body: dict[str, Any],
+) -> None:
+    response = client.post(path, headers=headers, json=body)
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "error_code": "invalid_request",
+        "message": "The request body is invalid.",
+        "retryable": False,
+        "quota_charged": False,
+    }
 
 
 @pytest.mark.parametrize(
@@ -465,3 +504,209 @@ def test_task_ids_are_opaque_and_have_at_least_128_bits_of_entropy(
     assert all(len(task_id) >= 22 for task_id in ids)
     assert all(re.fullmatch(r"[A-Za-z0-9_-]+", task_id) for task_id in ids)
     assert all(not task_id.startswith(("task-", "analysis-", "processing-")) for task_id in ids)
+
+
+def test_exhausted_sqlite_contention_returns_retryable_store_busy(
+    client: TestClient,
+    headers: dict[str, str],
+    db_session: Session,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    upload = _ready_upload(db_session, settings, upload_id="busy-upload")
+    original_execute = db_session.execute
+    begin_attempts = 0
+
+    def locked_execute(statement: Any, *args: Any, **kwargs: Any) -> Any:
+        nonlocal begin_attempts
+        if str(statement).strip().upper() == "BEGIN IMMEDIATE":
+            begin_attempts += 1
+            raise _sqlite_busy_error()
+        return original_execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "execute", locked_execute)
+
+    response = client.post(
+        "/api/tasks/analysis",
+        headers=headers,
+        json={"upload_id": upload.id},
+    )
+
+    _assert_error(response, 503, "task_store_busy", retryable=True)
+    assert begin_attempts > 1
+    monkeypatch.setattr(db_session, "execute", original_execute)
+    db_session.expire_all()
+    persisted_upload = db_session.get(Upload, upload.id)
+    assert persisted_upload is not None and persisted_upload.claimed_at is None
+    assert db_session.scalar(select(func.count()).select_from(DailyUsage)) == 0
+    assert db_session.scalar(select(func.count()).select_from(Task)) == 0
+
+
+def test_transient_sqlite_contention_retries_without_double_charge(
+    db_session: Session,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    upload = _ready_upload(db_session, settings, upload_id="transient-busy")
+    original_execute = db_session.execute
+    begin_attempts = 0
+
+    def transient_execute(statement: Any, *args: Any, **kwargs: Any) -> Any:
+        nonlocal begin_attempts
+        if str(statement).strip().upper() == "BEGIN IMMEDIATE":
+            begin_attempts += 1
+            if begin_attempts == 1:
+                raise _sqlite_busy_error()
+        return original_execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "execute", transient_execute)
+
+    task = TaskService(db_session, settings).create_analysis(
+        upload.id,
+        "test-client",
+        "testclient",
+    )
+
+    assert task.status is TaskStatus.QUEUED
+    assert begin_attempts == 2
+    usage = db_session.scalar(select(DailyUsage))
+    assert usage is not None and usage.count == 1
+    assert db_session.scalar(select(func.count()).select_from(Task)) == 1
+
+
+def test_unrelated_operational_error_is_not_retried(
+    db_session: Session,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    upload = _ready_upload(db_session, settings, upload_id="unrelated-db-error")
+    original_execute = db_session.execute
+    begin_attempts = 0
+
+    def broken_execute(statement: Any, *args: Any, **kwargs: Any) -> Any:
+        nonlocal begin_attempts
+        if str(statement).strip().upper() == "BEGIN IMMEDIATE":
+            begin_attempts += 1
+            raise OperationalError(
+                "BEGIN IMMEDIATE",
+                {},
+                sqlite3.OperationalError("disk I/O error"),
+            )
+        return original_execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "execute", broken_execute)
+
+    with pytest.raises(OperationalError):
+        TaskService(db_session, settings).create_analysis(
+            upload.id,
+            "test-client",
+            "testclient",
+        )
+
+    assert begin_attempts == 1
+
+
+def test_distinct_uploads_racing_for_last_quota_slot_do_not_overcharge(
+    settings: Settings,
+    db_session: Session,
+) -> None:
+    db_session.commit()
+    engine, session_factory = create_engine_and_session(settings.database_url)
+    with session_factory() as setup_session:
+        _ready_upload(setup_session, settings, upload_id="last-slot-a")
+        _ready_upload(setup_session, settings, upload_id="last-slot-b")
+        setup_session.add(
+            DailyUsage(
+                date=datetime.now(UTC).date(),
+                client_id_hash=_hash("test-client"),
+                ip_hash=_hash("testclient"),
+                count=settings.daily_task_limit - 1,
+            )
+        )
+        setup_session.commit()
+
+    barrier = Barrier(2)
+
+    def create(upload_id: str) -> str:
+        with session_factory() as session:
+            barrier.wait()
+            try:
+                TaskService(session, settings).create_analysis(
+                    upload_id,
+                    "test-client",
+                    "testclient",
+                )
+            except TaskCreationError as exc:
+                return exc.error_code
+            return "created"
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(create, ["last-slot-a", "last-slot-b"]))
+        assert sorted(results) == ["created", "daily_task_limit_reached"]
+        with session_factory() as session:
+            usage = session.scalar(select(DailyUsage))
+            uploads = session.scalars(
+                select(Upload).where(Upload.id.in_(["last-slot-a", "last-slot-b"]))
+            ).all()
+            assert usage is not None and usage.count == settings.daily_task_limit
+            assert sum(upload.claimed_at is not None for upload in uploads) == 1
+            assert session.scalar(select(func.count()).select_from(Task)) == 1
+    finally:
+        engine.dispose()
+
+
+def test_task_commit_failure_rolls_back_usage_and_upload_claim(
+    db_session: Session,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    upload = _ready_upload(db_session, settings, upload_id="commit-failure")
+
+    def fail_commit() -> None:
+        raise RuntimeError("injected commit failure")
+
+    monkeypatch.setattr(db_session, "commit", fail_commit)
+
+    with pytest.raises(RuntimeError, match="injected commit failure"):
+        TaskService(db_session, settings).create_analysis(
+            upload.id,
+            "test-client",
+            "testclient",
+        )
+
+    db_session.expire_all()
+    persisted_upload = db_session.get(Upload, upload.id)
+    assert persisted_upload is not None and persisted_upload.claimed_at is None
+    assert db_session.scalar(select(func.count()).select_from(DailyUsage)) == 0
+    assert db_session.scalar(select(func.count()).select_from(Task)) == 0
+
+
+def test_usage_is_charged_to_the_injected_clocks_utc_date(
+    db_session: Session,
+    settings: Settings,
+) -> None:
+    upload = _ready_upload(db_session, settings, upload_id="utc-boundary")
+    local_time = datetime(
+        2026,
+        6,
+        13,
+        0,
+        30,
+        tzinfo=timezone(timedelta(hours=14)),
+    )
+    upload.expires_at = local_time + timedelta(hours=1)
+    db_session.commit()
+
+    TaskService(
+        db_session,
+        settings,
+        clock=lambda: local_time,
+    ).create_analysis(upload.id, "test-client", "testclient")
+
+    usage = db_session.scalar(select(DailyUsage))
+    assert usage is not None
+    assert usage.date == date(2026, 6, 12)
+    assert db_session.execute(
+        text("SELECT count FROM daily_usage WHERE date = '2026-06-12'")
+    ).scalar_one() == 1
