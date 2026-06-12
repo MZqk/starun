@@ -1,8 +1,10 @@
 import json
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from starlette.formparsers import MultiPartParser
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.config import Settings
@@ -14,6 +16,7 @@ from app.uploads.errors import (
 from app.uploads.service import DiskUsage, get_disk_usage, get_settings
 
 MAX_MULTIPART_OVERHEAD_BYTES = 1024 * 1024
+MULTIPART_SPOOL_THRESHOLD_BYTES = MultiPartParser.spool_max_size
 
 
 class _RejectUploadRequest(Exception):
@@ -73,6 +76,7 @@ class UploadRequestGuardMiddleware:
         settings: Settings = _resolve_dependency(scope, get_settings)
         disk_usage: DiskUsage = _resolve_dependency(scope, get_disk_usage)
         request_limit = settings.max_upload_bytes + MAX_MULTIPART_OVERHEAD_BYTES
+        temp_path = _nearest_existing_parent(Path(tempfile.gettempdir()))
 
         content_length = next(
             (
@@ -95,12 +99,18 @@ class UploadRequestGuardMiddleware:
                 pass
 
         try:
-            self._ensure_disk_space(settings, disk_usage, initial_reservation)
+            self._ensure_disk_space(
+                disk_usage,
+                temp_path,
+                settings.min_free_disk_bytes,
+                initial_reservation,
+            )
             received_bytes = 0
+            spool_rolled_over = False
             rejection: UploadError | None = None
 
             async def guarded_receive() -> Message:
-                nonlocal received_bytes, rejection
+                nonlocal received_bytes, rejection, spool_rolled_over
                 message = await receive()
                 if message["type"] != "http.request":
                     return message
@@ -111,7 +121,23 @@ class UploadRequestGuardMiddleware:
                     rejection = upload_too_large_error()
                     return {"type": "http.disconnect"}
                 try:
-                    self._ensure_disk_space(settings, disk_usage, len(body))
+                    crossed_spool_threshold = (
+                        not spool_rolled_over
+                        and received_bytes > MULTIPART_SPOOL_THRESHOLD_BYTES
+                    )
+                    reservation_bytes = 0
+                    if spool_rolled_over:
+                        reservation_bytes = len(body)
+                    elif crossed_spool_threshold:
+                        reservation_bytes = received_bytes
+                    self._ensure_disk_space(
+                        disk_usage,
+                        temp_path,
+                        settings.min_free_disk_bytes,
+                        reservation_bytes,
+                    )
+                    if crossed_spool_threshold:
+                        spool_rolled_over = True
                 except _RejectUploadRequest as exc:
                     rejection = exc.error
                     return {"type": "http.disconnect"}
@@ -129,11 +155,11 @@ class UploadRequestGuardMiddleware:
 
     @staticmethod
     def _ensure_disk_space(
-        settings: Settings,
         disk_usage: DiskUsage,
+        disk_path: Path,
+        min_free_disk_bytes: int,
         reservation_bytes: int,
     ) -> None:
-        disk_path = _nearest_existing_parent(settings.data_root)
         free_bytes = disk_usage(disk_path).free
-        if free_bytes < settings.min_free_disk_bytes + reservation_bytes:
+        if free_bytes < min_free_disk_bytes + reservation_bytes:
             raise _RejectUploadRequest(insufficient_storage_error())

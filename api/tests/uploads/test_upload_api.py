@@ -1,5 +1,6 @@
 import hashlib
 import json
+import tempfile
 from collections import namedtuple
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
@@ -12,6 +13,7 @@ from fastapi import UploadFile
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from starlette.formparsers import MultiPartParser
 from starlette.types import Message, Receive, Scope, Send
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
@@ -277,6 +279,48 @@ async def test_request_is_rejected_before_parser_when_disk_reserve_is_low(
     assert response["error_code"] == "insufficient_storage"
     assert response["retryable"] is True
     assert route_reached is False
+
+
+@pytest.mark.asyncio
+async def test_temp_spool_rollover_checks_cumulative_buffered_bytes(
+    client: TestClient,
+    settings: Settings,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings.max_upload_bytes = 2 * MultiPartParser.spool_max_size
+    temp_root = tmp_path / "multipart-temp"
+    temp_root.mkdir()
+    route_reached = False
+    checked_paths: list[Path] = []
+    free_bytes = 700 * 1024
+
+    async def fail_if_route_reached(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal route_reached
+        route_reached = True
+        raise AssertionError("upload route reached")
+
+    def disk_usage(path: Path) -> Any:
+        checked_paths.append(path)
+        return DiskUsage(4 * MultiPartParser.spool_max_size, 0, free_bytes)
+
+    monkeypatch.setattr(UploadService, "create", fail_if_route_reached)
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(temp_root))
+    app.dependency_overrides[get_disk_usage] = lambda: disk_usage
+    try:
+        status, response = await send_chunked_asgi_request(
+            multipart_body(b"x" * (MultiPartParser.spool_max_size + 128 * 1024)),
+            chunk_size=600 * 1024,
+        )
+    finally:
+        app.dependency_overrides.pop(get_disk_usage, None)
+
+    assert status == 507
+    assert response["error_code"] == "insufficient_storage"
+    assert response["retryable"] is True
+    assert route_reached is False
+    assert checked_paths
+    assert set(checked_paths) == {temp_root}
 
 
 class RecordingStream(BytesIO):
