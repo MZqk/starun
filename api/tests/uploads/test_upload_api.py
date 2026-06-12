@@ -15,6 +15,7 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.config import Settings
 from app.db.models import DailyUsage, Task, Upload, UploadStatus
+from app.uploads.errors import UploadError
 from app.uploads.service import (
     CHUNK_SIZE,
     UploadService,
@@ -160,6 +161,7 @@ class RecordingStream(BytesIO):
     def __init__(self, value: bytes, *, fail_after: int | None = None) -> None:
         super().__init__(value)
         self.read_sizes: list[int] = []
+        self.bytes_read = 0
         self.fail_after = fail_after
         self.closed_by_service = False
 
@@ -167,7 +169,9 @@ class RecordingStream(BytesIO):
         self.read_sizes.append(size)
         if self.fail_after is not None and self.tell() >= self.fail_after:
             raise ConnectionError("client disconnected")
-        return super().read(size)
+        chunk = super().read(size)
+        self.bytes_read += len(chunk)
+        return chunk
 
     def close(self) -> None:
         self.closed_by_service = True
@@ -190,6 +194,35 @@ async def test_service_reads_only_bounded_chunks_and_closes_upload(
     assert max(stream.read_sizes) == CHUNK_SIZE
     assert -1 not in stream.read_sizes
     assert stream.closed_by_service is True
+
+
+@pytest.mark.asyncio
+async def test_service_enforces_max_without_content_length_and_cleans_up(
+    settings: Settings,
+    db_session: Session,
+    data_root: Path,
+) -> None:
+    settings.max_upload_bytes = CHUNK_SIZE
+    stream = RecordingStream(b"x" * (settings.max_upload_bytes + 1))
+    file = UploadFile(stream, filename="image.fits")
+
+    with pytest.raises(UploadError) as exc_info:
+        await UploadService(db_session, settings).create(
+            file,
+            "client",
+            "127.0.0.1",
+        )
+
+    assert exc_info.value.status_code == 413
+    assert exc_info.value.error_code == "upload_too_large"
+    assert stream.bytes_read == settings.max_upload_bytes + 1
+    assert stream.read_sizes == [CHUNK_SIZE, CHUNK_SIZE]
+    assert stream.closed_by_service is True
+    row = db_session.scalar(select(Upload))
+    assert row is not None
+    assert row.status is UploadStatus.INVALID
+    assert row.validation_result == {"error_code": "upload_too_large"}
+    assert not (data_root / "uploads" / row.id).exists()
 
 
 def test_client_and_ip_are_hashed_without_persisting_originals(
