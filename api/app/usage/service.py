@@ -1,7 +1,7 @@
 import hashlib
 from datetime import UTC, date, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -32,5 +32,11 @@ def get_daily_usage(
             DailyUsage.ip_hash == hash_identity(request_ip),
         )
     )
-    count = used or 0
+    ip_used = session.scalar(
+        select(func.coalesce(func.sum(DailyUsage.count), 0)).where(
+            DailyUsage.date == usage_date,
+            DailyUsage.ip_hash == hash_identity(request_ip),
+        )
+    )
+    count = max(used or 0, ip_used or 0)
     return usage_date, count, max(settings.daily_task_limit - count, 0)

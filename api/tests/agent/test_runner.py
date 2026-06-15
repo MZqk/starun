@@ -107,6 +107,109 @@ def build_runner(context: TaskContext) -> AgentRunner:
 
 
 @pytest.mark.asyncio
+async def test_mock_agent_default_has_no_step_delay(
+    tmp_path: Path,
+    fits_inspection: FitsInspection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = make_context(tmp_path, fits_inspection)
+    sleep_calls: list[float] = []
+
+    async def record_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr("app.agent.runner.asyncio.sleep", record_sleep)
+
+    await build_runner(context).run(context)
+
+    assert sleep_calls == []
+
+
+@pytest.mark.asyncio
+async def test_configured_step_delay_is_cancellation_responsive(
+    tmp_path: Path,
+    fits_inspection: FitsInspection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancelled = False
+    sleep_calls: list[float] = []
+    context = make_context(
+        tmp_path,
+        fits_inspection,
+        cancellation_check=lambda: cancelled,
+    )
+    runner = build_mock_runner(
+        ArtifactStore(context.task_dir),
+        step_delay_seconds=0.2,
+    )
+
+    async def cancel_after_checkpoint(seconds: float) -> None:
+        nonlocal cancelled
+        sleep_calls.append(seconds)
+        cancelled = True
+
+    monkeypatch.setattr(
+        "app.agent.runner.asyncio.sleep",
+        cancel_after_checkpoint,
+    )
+
+    with pytest.raises(AgentCancelledError, match="agent_run_cancelled"):
+        await runner.run(context)
+    assert sleep_calls == [0.05]
+    assert sum(sleep_calls) < 0.2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_event_sink_receives_each_event_immediately_and_preserves_result(
+    tmp_path: Path,
+    fits_inspection: FitsInspection,
+    asynchronous: bool,
+) -> None:
+    context = make_context(tmp_path, fits_inspection)
+    received: list[str] = []
+
+    async def async_sink(event: Any) -> None:
+        received.append(event.event_type)
+
+    def sync_sink(event: Any) -> None:
+        received.append(event.event_type)
+
+    runner = build_mock_runner(
+        ArtifactStore(context.task_dir),
+        event_sink=async_sink if asynchronous else sync_sink,
+    )
+
+    result = await runner.run(context)
+
+    expected = [event.event_type for event in result.events]
+    assert received == expected
+    assert received[:3] == ["plan", "tool_started", "tool_finished"]
+    assert received[-2:] == ["evaluation", "completion"]
+
+
+@pytest.mark.asyncio
+async def test_event_sink_failure_stops_agent_consistently(
+    tmp_path: Path,
+    fits_inspection: FitsInspection,
+) -> None:
+    context = make_context(tmp_path, fits_inspection)
+
+    def failing_sink(event: Any) -> None:
+        if event.event_type == "tool_started":
+            raise OSError("event store unavailable")
+
+    runner = build_mock_runner(
+        ArtifactStore(context.task_dir),
+        event_sink=failing_sink,
+    )
+
+    with pytest.raises(OSError, match="event store unavailable"):
+        await runner.run(context)
+    assert not (context.task_dir / "result-demo.tiff").exists()
+
+
+@pytest.mark.asyncio
 async def test_mock_agent_is_byte_deterministic(
     tmp_path: Path,
     fits_inspection: FitsInspection,
@@ -444,16 +547,55 @@ def test_clean_artifact_package_import_has_no_cycle() -> None:
         [
             sys.executable,
             "-c",
-            "from app.artifacts import ArtifactStore; print(ArtifactStore.__name__)",
+            (
+                "from app.agent import AgentRunner, TaskContext, ToolRegistry; "
+                "from app.artifacts import ArtifactStore; "
+                "print(AgentRunner.__name__, TaskContext.__name__, "
+                "ToolRegistry.__name__, ArtifactStore.__name__)"
+            ),
         ],
         cwd=Path(__file__).parents[2],
         check=False,
         capture_output=True,
         text=True,
+        timeout=2,
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "ArtifactStore"
+    assert result.stdout.strip() == "AgentRunner TaskContext ToolRegistry ArtifactStore"
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO creation is unsupported")
+def test_artifact_store_rejects_fifo_without_blocking(tmp_path: Path) -> None:
+    script = """
+import os
+import sys
+from pathlib import Path
+
+from app.artifacts import ArtifactPathError, ArtifactStore
+
+root = Path(sys.argv[1])
+root.mkdir()
+os.mkfifo(root / "preview-demo.png")
+with ArtifactStore(root) as store:
+    assert not store.exists("preview-demo.png")
+    try:
+        store.read_bytes("preview-demo.png")
+    except ArtifactPathError:
+        pass
+    else:
+        raise AssertionError("FIFO read did not raise ArtifactPathError")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path / "task")],
+        cwd=Path(__file__).parents[2],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=2,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_artifact_store_rejects_symlink_root(tmp_path: Path) -> None:
@@ -491,7 +633,7 @@ def test_artifact_store_does_not_follow_artifact_symlink(tmp_path: Path) -> None
     linked.symlink_to(outside)
 
     with ArtifactStore(task_dir) as store:
-        with pytest.raises(OSError):
+        with pytest.raises(ArtifactPathError):
             store.read_bytes("preview-demo.png")
         store.write_bytes("preview-demo.png", b"inside")
 

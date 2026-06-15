@@ -5,6 +5,7 @@ from app.artifacts.store import (
     ArtifactStore,
     UnsupportedArtifactError,
 )
+from app.artifacts.router import router
 
 __all__ = [
     "ArtifactManifestEntry",
@@ -12,4 +13,5 @@ __all__ = [
     "ArtifactSizeError",
     "ArtifactStore",
     "UnsupportedArtifactError",
+    "router",
 ]

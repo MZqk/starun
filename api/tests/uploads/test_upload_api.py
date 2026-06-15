@@ -19,7 +19,7 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.config import Settings
 from app.db.models import DailyUsage, Task, Upload, UploadStatus
-from app.uploads.errors import UploadError, upload_too_large_error
+from app.uploads.errors import UnexpectedUploadError, UploadError, upload_too_large_error
 from app.uploads.service import (
     CHUNK_SIZE,
     UploadService,
@@ -360,6 +360,40 @@ async def test_service_reads_only_bounded_chunks_and_closes_upload(
     assert max(stream.read_sizes) == CHUNK_SIZE
     assert -1 not in stream.read_sizes
     assert stream.closed_by_service is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("symlink_target", ["data_root", "uploads", "upload_dir"])
+async def test_upload_write_rejects_symlinked_storage_components(
+    settings: Settings,
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    symlink_target: str,
+) -> None:
+    outside = tmp_path / f"outside-{symlink_target}"
+    outside.mkdir()
+    sentinel = outside / "sentinel"
+    sentinel.write_bytes(b"unchanged")
+    upload_id = "fixed-upload-id"
+    monkeypatch.setattr("app.uploads.service.secrets.token_urlsafe", lambda _size: upload_id)
+
+    if symlink_target == "data_root":
+        settings.data_root.rmdir()
+        settings.data_root.symlink_to(outside, target_is_directory=True)
+    elif symlink_target == "uploads":
+        (settings.data_root / "uploads").symlink_to(outside, target_is_directory=True)
+    else:
+        uploads = settings.data_root / "uploads"
+        uploads.mkdir()
+        (uploads / upload_id).symlink_to(outside, target_is_directory=True)
+
+    file = UploadFile(BytesIO(b"not-written"), filename="image.fits")
+    with pytest.raises(UnexpectedUploadError):
+        await UploadService(db_session, settings).create(file, "client", "127.0.0.1")
+
+    assert sentinel.read_bytes() == b"unchanged"
+    assert set(outside.iterdir()) == {sentinel}
 
 
 @pytest.mark.asyncio

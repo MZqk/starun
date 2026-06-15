@@ -3,13 +3,22 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
-import app.db.models  # noqa: F401
 from app.config import Settings
 from app.db.base import Base
+from app.db import models as _models  # noqa: F401
 from app.db.session import create_engine_and_session, get_db_session
-from app.main import app
+from app.main import app, build_lifespan
+from app.security.rate_limit import reset_rate_limiters
+from app.tasks.executor import SerialTaskExecutor
+
+
+@pytest.fixture(autouse=True)
+def isolated_rate_limiters() -> Generator[None, None, None]:
+    reset_rate_limiters()
+    yield
+    reset_rate_limiters()
 
 
 @pytest.fixture
@@ -45,17 +54,31 @@ def db_session(settings: Settings) -> Generator[Session, None, None]:
 def client(settings: Settings, db_session: Session) -> Generator[TestClient, None, None]:
     from app.uploads.service import get_settings
 
+    session_factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
+
+    class InertTaskExecutor(SerialTaskExecutor):
+        def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            self.worker_task = None
+
     def override_db_session() -> Generator[Session, None, None]:
         yield db_session
 
+    previous_lifespan = app.router.lifespan_context
     previous_db_override = app.dependency_overrides.get(get_db_session)
     previous_settings_override = app.dependency_overrides.get(get_settings)
+    app.router.lifespan_context = build_lifespan(
+        executor_factory=lambda: InertTaskExecutor(session_factory, settings),
+    )
     app.dependency_overrides[get_db_session] = override_db_session
     app.dependency_overrides[get_settings] = lambda: settings
     try:
         with TestClient(app) as test_client:
             yield test_client
     finally:
+        app.router.lifespan_context = previous_lifespan
         if previous_db_override is None:
             app.dependency_overrides.pop(get_db_session, None)
         else:

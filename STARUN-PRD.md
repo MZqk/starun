@@ -4,6 +4,10 @@
 
 > 本文档包含从零构建 Starun 所需的全部设计规范、页面规格、组件定义和技术约束。
 > 当前原型部署: https://b4d9db3268ea4f28afd363b00141f6df.app.codebuddy.work
+>
+> 已批准的实现依据:
+> [MVP 设计文档](docs/superpowers/specs/2026-06-11-starun-mvp-design.md)、
+> [MVP 实施计划](docs/superpowers/plans/2026-06-11-starun-mvp-implementation.md)。
 
 ---
 
@@ -12,6 +16,8 @@
 **Starun** 是一款面向天文摄影爱好者的在线后期处理工具。用户上传 FITS 格式天文原始文件，通过 AI 分析图像关键参数并生成优化建议，或一键执行完整后期处理管线。
 
 **核心定位**: 专业但不复杂。界面风格偏向深空观测台的暗室氛围——深黑底色、红色点缀、银河星场纹理。
+
+**Milestone 1 能力边界**: FITS 验证、HDU 扫描与选择、头信息、图像尺寸、位深和基础统计是真实结果。当前 SNR、FWHM、椭圆率等专业指标，Agent 计划与结果、处理预览和下载产物均为明确标识的确定性 Mock，不代表真实天文图像分析或处理结果。
 
 ---
 
@@ -362,7 +368,7 @@ Variants:
 语言:        TypeScript
 样式:        Tailwind CSS v4
 字体:        Geist + Geist Mono (next/font/google)
-部署:        Static Export (output: "export")
+部署:        Next.js Web + 独立 FastAPI；上传、任务、轮询和下载由 API 提供
 包管理:      npm
 图标:        内联 SVG (无图标库依赖)
 ```
@@ -390,9 +396,9 @@ src/
 ### 8.2 启动命令
 
 ```bash
-npm install
+npm ci
 npm run dev      # 开发: localhost:3000
-npm run build    # 构建静态文件到 out/
+npm run build    # Next.js 生产构建
 ```
 
 ---
@@ -411,14 +417,16 @@ npm run build    # 构建静态文件到 out/
 
 ## 10. 后端接口预留
 
-以下接口为前端预留，当前原型中为静态模拟数据:
+当前 Web 通过 HTTP 轮询任务状态和增量事件。FITS/HDU/基础统计来自真实检查；
+专业指标、Agent 结果、预览和产物为明确标识的 Mock。
 
 ```
-POST /api/upload          # 上传 FITS 文件 (multipart, max 500MB)
-POST /api/analyze         # 分析 FITS 文件，返回参数 + 建议
-POST /api/process         # 执行处理管线，SSE 推送进度
-GET  /api/history         # 获取上传历史列表
-GET  /api/result/:id      # 下载处理结果 (TIFF/PNG)
+POST /api/uploads                         # 流式上传并验证 FITS (max 500MB)
+POST /api/tasks/analysis                  # 创建 Mock 专业分析任务
+POST /api/tasks/process                   # 创建 Mock Agent 处理任务
+GET  /api/tasks/:id                       # HTTP 轮询任务状态和结果
+GET  /api/tasks/:id/events?after=:seq     # HTTP 轮询增量事件
+GET  /api/tasks/:id/artifacts/:name       # 下载明确标识的 Mock 产物
 ```
 
 ---

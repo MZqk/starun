@@ -5,9 +5,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from threading import Barrier
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import OperationalError
@@ -161,6 +162,37 @@ def test_analysis_claims_upload_and_charges_exactly_once(
     assert usage.count == 1
 
 
+@pytest.mark.parametrize(
+    ("path", "upload_id"),
+    [
+        ("/api/tasks/analysis", "notify-analysis"),
+        ("/api/tasks/process", "notify-processing"),
+    ],
+)
+def test_successful_task_creation_notifies_executor(
+    client: TestClient,
+    headers: dict[str, str],
+    db_session: Session,
+    settings: Settings,
+    path: str,
+    upload_id: str,
+) -> None:
+    upload = _ready_upload(db_session, settings, upload_id=upload_id)
+    notifications = 0
+
+    class RecordingExecutor:
+        def notify(self) -> None:
+            nonlocal notifications
+            notifications += 1
+
+    cast(FastAPI, client.app).state.task_executor = RecordingExecutor()
+
+    response = client.post(path, headers=headers, json={"upload_id": upload.id})
+
+    assert response.status_code == 201
+    assert notifications == 1
+
+
 def test_sixth_task_is_rejected_at_daily_limit(
     client: TestClient,
     headers: dict[str, str],
@@ -189,6 +221,34 @@ def test_sixth_task_is_rejected_at_daily_limit(
     untouched = db_session.get(Upload, "quota-upload-5")
     assert usage is not None and usage.count == 5
     assert untouched is not None and untouched.claimed_at is None
+
+
+def test_rotating_client_ids_cannot_bypass_daily_ip_quota(
+    client: TestClient,
+    db_session: Session,
+    settings: Settings,
+) -> None:
+    for index in range(6):
+        client_id = f"quota-rotation-{index}"
+        upload = _ready_upload(
+            db_session,
+            settings,
+            upload_id=f"quota-rotation-upload-{index}",
+        )
+        upload.client_id_hash = _hash(client_id)
+        db_session.commit()
+        response = client.post(
+            "/api/tasks/analysis",
+            headers={"X-Starun-Client-Id": client_id},
+            json={"upload_id": upload.id},
+        )
+        if index < settings.daily_task_limit:
+            assert response.status_code == 201
+        else:
+            _assert_error(response, 429, "daily_task_limit_reached")
+
+    rejected = db_session.get(Upload, "quota-rotation-upload-5")
+    assert rejected is not None and rejected.claimed_at is None
 
 
 @pytest.mark.parametrize(
@@ -327,10 +387,9 @@ def test_processing_defaults_balanced_and_validates_request_shape(
 
     assert response.status_code == 201
     assert response.json()["style"] == "balanced"
-    assert (
-        db_session.get(Task, response.json()["task_id"]).style
-        is ProcessingStyle.BALANCED
-    )
+    task = db_session.get(Task, response.json()["task_id"])
+    assert task is not None
+    assert task.style is ProcessingStyle.BALANCED
     rejected = client.post(
         "/api/tasks/process",
         headers=headers,

@@ -6,11 +6,12 @@
     "start": "next start",
     "build": "next build",
     "test": "vitest",
-    "test:e2e": "playwright test",
+    "test:e2e": "node e2e/run.mjs",
     "lint": "eslint ."
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4",
+    "geist": "^1.7.2",
     "next": "^16",
     "react": "^19",
     "react-dom": "^19",

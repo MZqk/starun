@@ -13,6 +13,7 @@ from app.artifacts.contracts import (
     media_type_for_name,
     validate_artifact_name,
 )
+from app.filesystem import UnsafePathError, open_directory_fd
 
 
 class ArtifactPathError(ValueError):
@@ -28,30 +29,30 @@ class ArtifactSizeError(ValueError):
 
 
 class ArtifactStore:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, create: bool = True) -> None:
         self._root_fd: int | None = None
-        root.mkdir(parents=True, exist_ok=True)
         self.root = root.absolute()
-        root_stat = root.lstat()
-        if stat.S_ISLNK(root_stat.st_mode):
-            raise ArtifactPathError("artifact root must not be a symlink")
-        if not stat.S_ISDIR(root_stat.st_mode):
-            raise ArtifactPathError("artifact root must be a directory")
-        flags = (
-            os.O_RDONLY
-            | getattr(os, "O_CLOEXEC", 0)
-            | getattr(os, "O_DIRECTORY", 0)
-            | getattr(os, "O_NOFOLLOW", 0)
-        )
         try:
-            root_fd = os.open(root, flags)
-        except OSError as exc:
-            raise ArtifactPathError("artifact root could not be opened safely") from exc
-        opened_stat = os.fstat(root_fd)
-        if (opened_stat.st_dev, opened_stat.st_ino) != (root_stat.st_dev, root_stat.st_ino):
-            os.close(root_fd)
-            raise ArtifactPathError("artifact root changed while opening")
-        self._root_fd = root_fd
+            self._root_fd = open_directory_fd(root, create=create)
+        except (OSError, UnsafePathError) as exc:
+            raise ArtifactPathError(
+                "artifact root or parent is unsafe or symlinked"
+            ) from exc
+
+    @classmethod
+    def from_directory_fd(cls, root: Path, directory_fd: int) -> "ArtifactStore":
+        instance = cls.__new__(cls)
+        instance._root_fd = None
+        instance.root = root.absolute()
+        descriptor = os.dup(directory_fd)
+        try:
+            if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+                raise ArtifactPathError("artifact root must be a directory")
+            instance._root_fd = descriptor
+            return instance
+        except BaseException:
+            os.close(descriptor)
+            raise
 
     @property
     def root_fd(self) -> int:
@@ -120,9 +121,15 @@ class ArtifactStore:
         flags = (
             os.O_RDONLY
             | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NONBLOCK", 0)
             | getattr(os, "O_NOFOLLOW", 0)
         )
-        descriptor = os.open(name, flags, dir_fd=root_fd)
+        try:
+            descriptor = os.open(name, flags, dir_fd=root_fd)
+        except FileNotFoundError:
+            raise
+        except OSError as exc:
+            raise ArtifactPathError("artifact could not be opened safely") from exc
         try:
             file_stat = os.fstat(descriptor)
             if not stat.S_ISREG(file_stat.st_mode):
@@ -160,18 +167,14 @@ class ArtifactStore:
     def exists(self, name: str) -> bool:
         self._validate_supported_name(name)
         try:
-            descriptor = os.open(
+            file_stat = os.stat(
                 name,
-                os.O_RDONLY
-                | getattr(os, "O_CLOEXEC", 0)
-                | getattr(os, "O_NOFOLLOW", 0),
                 dir_fd=self._require_root_fd(),
+                follow_symlinks=False,
             )
         except FileNotFoundError:
             return False
-        else:
-            os.close(descriptor)
-            return True
+        return stat.S_ISREG(file_stat.st_mode)
 
     def matches_root(self, path: Path) -> bool:
         flags = (

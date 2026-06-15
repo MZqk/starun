@@ -23,6 +23,12 @@ from app.db.models import (
 )
 
 
+def test_mock_agent_step_delay_defaults_to_zero_and_rejects_negative_values() -> None:
+    assert Settings().mock_agent_step_delay_seconds == 0
+    with pytest.raises(ValueError):
+        Settings(mock_agent_step_delay_seconds=-0.01)
+
+
 def test_upload_and_task_defaults(db_session) -> None:
     upload = Upload(
         id="upload-1",
@@ -219,6 +225,10 @@ def test_datetime_values_round_trip_as_aware_utc(db_session) -> None:
         ip_hash="ip",
         upload=upload,
         cancel_requested_at=offset_time + timedelta(minutes=2),
+        delete_requested_at=offset_time + timedelta(minutes=2),
+        cleanup_pending=True,
+        cleanup_error="diagnostic_id=cleanup-test",
+        cleanup_plan={"task_dir": True, "source_path": True},
         created_at=offset_time,
         started_at=offset_time + timedelta(minutes=3),
         finished_at=offset_time + timedelta(minutes=4),
@@ -240,6 +250,10 @@ def test_datetime_values_round_trip_as_aware_utc(db_session) -> None:
     assert reloaded is not None
     assert reloaded.created_at.tzinfo is UTC
     assert reloaded.created_at == now
+    assert reloaded.delete_requested_at == offset_time + timedelta(minutes=2)
+    assert reloaded.cleanup_pending is True
+    assert reloaded.cleanup_error == "diagnostic_id=cleanup-test"
+    assert reloaded.cleanup_plan == {"task_dir": True, "source_path": True}
     stored_created_at = db_session.execute(
         text("SELECT created_at FROM tasks WHERE id = 'task-datetime'")
     ).scalar_one()

@@ -1,16 +1,23 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { GeistMono } from "geist/font/mono";
+import { GeistSans } from "geist/font/sans";
+import NavBar from "../components/NavBar";
+import { zhCN } from "../lib/i18n/zh-CN";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Starun",
-  description: "深空天文后期分析与自动出图平台",
+  title: `${zhCN.brand.name} | ${zhCN.brand.tagline}`,
+  description: zhCN.home.hero.description,
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body className={`${GeistSans.variable} ${GeistMono.variable}`}>
+        <NavBar />
+        {children}
+      </body>
     </html>
   );
 }

@@ -1,4 +1,4 @@
-.PHONY: install dev test lint build
+.PHONY: install dev test test-e2e lint build
 
 install:
 	cd api && uv sync --extra dev
@@ -10,6 +10,9 @@ dev:
 test:
 	cd api && uv run pytest
 	cd web && npm test -- --run
+
+test-e2e:
+	cd web && npm run test:e2e
 
 lint:
 	cd api && uv run ruff check . && uv run mypy app

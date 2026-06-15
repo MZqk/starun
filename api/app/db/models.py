@@ -123,6 +123,13 @@ class Upload(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     claimed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    cleanup_pending: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=false(),
+    )
+    cleanup_error: Mapped[str | None] = mapped_column(String)
+    cleanup_plan: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     tasks: Mapped[list["Task"]] = relationship(back_populates="upload")
 
 
@@ -160,6 +167,14 @@ class Task(Base):
         server_default=false(),
     )
     cancel_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    delete_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    cleanup_pending: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=false(),
+    )
+    cleanup_error: Mapped[str | None] = mapped_column(String)
+    cleanup_plan: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime())

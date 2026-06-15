@@ -1,6 +1,7 @@
 from datetime import date, datetime
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.db.models import ProcessingStyle, TaskStatus, TaskType
 
@@ -40,6 +41,48 @@ class TaskErrorResponse(BaseModel):
     message: str
     retryable: bool = False
     quota_charged: bool = False
+    diagnostic_id: str | None = None
+
+
+class TaskResultResponse(BaseModel):
+    manifest_available: bool
+    summary: dict[str, Any] | None = None
+    artifacts: list[str] = Field(default_factory=list)
+
+
+class TaskDetailResponse(BaseModel):
+    id: str
+    type: TaskType
+    status: TaskStatus
+    stage: str | None
+    progress: int
+    style: ProcessingStyle | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    expires_at: datetime | None
+    error_code: str | None
+    message: str | None
+    retryable: bool
+    quota_charged: bool
+    cleanup_pending: bool
+    result: TaskResultResponse
+    selected_hdu: int | None
+    inspection: dict[str, Any] | None = None
+
+
+class TaskEventResponse(BaseModel):
+    sequence: int
+    level: str
+    event_type: str
+    payload: dict[str, Any]
+    created_at: datetime
+
+
+class TaskEventsResponse(BaseModel):
+    events: list[TaskEventResponse]
+    next_after: int
+    has_more: bool
 
 
 class UsageResponse(BaseModel):

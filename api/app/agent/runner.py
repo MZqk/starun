@@ -1,6 +1,8 @@
+import asyncio
+import inspect
 import json
 import math
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -24,6 +26,7 @@ MAX_ITERATIONS = 2
 MAX_ARTIFACT_COUNT = 16
 MAX_OBSERVATION_JSON_BYTES = 64 * 1024
 OccurrenceTimestampProvider = Callable[[TaskContext, int], datetime]
+EventSink = Callable[[AgentEvent], Awaitable[None] | None]
 
 
 class AgentGuardrailError(ValueError):
@@ -51,10 +54,16 @@ class AgentRunner:
         registry: ToolRegistry,
         artifact_store: ArtifactStore,
         occurrence_timestamp_provider: OccurrenceTimestampProvider | None = None,
+        step_delay_seconds: float = 0,
+        event_sink: EventSink | None = None,
     ) -> None:
+        if step_delay_seconds < 0:
+            raise ValueError("step_delay_seconds must be nonnegative")
         self._model = model
         self._registry = registry
         self._artifact_store = artifact_store
+        self._step_delay_seconds = step_delay_seconds
+        self._event_sink = event_sink
         self._occurrence_timestamp_provider = (
             occurrence_timestamp_provider or utc_occurrence_timestamp
         )
@@ -69,7 +78,7 @@ class AgentRunner:
         events: list[AgentEvent] = []
         artifact_names: set[str] = set()
         observation_json_bytes = 0
-        self._event(
+        await self._event(
             context,
             events,
             "plan",
@@ -81,8 +90,8 @@ class AgentRunner:
         )
         combined = ToolResult()
         for step, tool, arguments in prepared:
-            self._check_cancelled(context)
-            self._event(
+            await self._delay_checkpoint(context)
+            await self._event(
                 context,
                 events,
                 "tool_started",
@@ -105,7 +114,7 @@ class AgentRunner:
             event_metrics: dict[str, JsonValue] = {
                 name: value for name, value in result.metrics.items()
             }
-            self._event(
+            await self._event(
                 context,
                 events,
                 "tool_finished",
@@ -126,13 +135,13 @@ class AgentRunner:
             or not 0.0 <= quality_score <= 1.0
         ):
             raise AgentOutputError("model evaluation returned an invalid quality score")
-        self._event(
+        await self._event(
             context,
             events,
             "evaluation",
             {"quality_score": quality_score},
         )
-        self._event(
+        await self._event(
             context,
             events,
             "completion",
@@ -228,7 +237,16 @@ class AgentRunner:
         if context.cancellation_check():
             raise AgentCancelledError()
 
-    def _event(
+    async def _delay_checkpoint(self, context: TaskContext) -> None:
+        self._check_cancelled(context)
+        remaining = self._step_delay_seconds
+        while remaining > 0:
+            interval = min(remaining, 0.05)
+            await asyncio.sleep(interval)
+            remaining -= interval
+            self._check_cancelled(context)
+
+    async def _event(
         self,
         context: TaskContext,
         events: list[AgentEvent],
@@ -236,14 +254,17 @@ class AgentRunner:
         payload: dict[str, JsonValue],
     ) -> None:
         sequence = len(events) + 1
-        events.append(
-            AgentEvent(
-                sequence=sequence,
-                event_type=event_type,  # type: ignore[arg-type]
-                payload=payload,
-                timestamp=self._occurrence_timestamp(context, sequence),
-            )
+        event = AgentEvent(
+            sequence=sequence,
+            event_type=event_type,  # type: ignore[arg-type]
+            payload=payload,
+            timestamp=self._occurrence_timestamp(context, sequence),
         )
+        events.append(event)
+        if self._event_sink is not None:
+            result = self._event_sink(event)
+            if inspect.isawaitable(result):
+                await result
 
     def _occurrence_timestamp(self, context: TaskContext, sequence: int) -> datetime:
         timestamp = self._occurrence_timestamp_provider(context, sequence)
