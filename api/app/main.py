@@ -8,6 +8,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.middleware.cors import CORSMiddleware
 
 from app.artifacts.router import router as artifacts_router
 from app.cleanup.service import CleanupScheduler, recover_interrupted_uploads
@@ -110,6 +111,16 @@ def create_app(
         ),
     )
     application.add_middleware(UploadRequestGuardMiddleware)
+    active_settings = settings or Settings()
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=active_settings.allowed_web_origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["Accept", "Content-Type", "X-Starun-Client-Id"],
+        expose_headers=["Content-Disposition", "Content-Length"],
+        max_age=600,
+    )
     application.include_router(uploads_router)
     application.include_router(tasks_router)
     application.include_router(artifacts_router)

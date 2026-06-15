@@ -1,8 +1,8 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import MockNotice from "../../components/MockNotice";
 import TaskEventLog from "../../components/TaskEventLog";
 import TaskStatusPanel from "../../components/TaskStatusPanel";
 import UploadZone from "../../components/UploadZone";
@@ -24,6 +24,22 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function asRecordList(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.map(asRecord).filter((item): item is Record<string, unknown> => item !== null)
+    : [];
+}
+
+function asStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
 function resumedTaskId(): string | null {
   if (typeof window === "undefined") return null;
   return new URLSearchParams(window.location.search).get("task");
@@ -42,6 +58,11 @@ export default function AnalysisPage() {
     string | null
   >(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
+  const [preview, setPreview] = useState<{
+    taskId: string;
+    url: string | null;
+    error: string | null;
+  } | null>(null);
   const {
     task,
     events,
@@ -159,16 +180,50 @@ export default function AnalysisPage() {
     return task?.inspection as unknown as FitsInspection | null;
   }, [task?.inspection, upload]);
   const summary = asRecord(task?.result.summary);
-  const metrics = asRecord(summary?.professional_metrics);
-  const recommendations = Array.isArray(summary?.recommendations)
-    ? summary.recommendations.filter(
-        (item): item is string => typeof item === "string",
-      )
-    : [];
+  const analysis = asRecord(summary?.analysis);
+  const imageQuality = asRecord(analysis?.image_quality);
+  const observations = asRecord(analysis?.observations);
+  const issues = asRecordList(analysis?.issues);
+  const workflow = asRecordList(analysis?.workflow);
+  const caveats = asStringList(analysis?.caveats);
   const sourceValid =
     task?.status === "completed" &&
     task.expires_at !== null &&
     new Date(task.expires_at).getTime() > currentTime;
+  const previewName =
+    sourceValid && task
+      ? task.result.artifacts.find((name) => name === "analysis-preview.png") ?? null
+      : null;
+
+  useEffect(() => {
+    if (!taskId || !previewName) return;
+    let active = true;
+    let objectUrl: string | null = null;
+    const controller = new AbortController();
+    void getApiClient()
+      .downloadArtifact(taskId, previewName, { signal: controller.signal })
+      .then((artifact) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(artifact.blob);
+        setPreview({ taskId, url: objectUrl, error: null });
+      })
+      .catch((caught) => {
+        if (!active || controller.signal.aborted) return;
+        setPreview({
+          taskId,
+          url: null,
+          error: caught instanceof Error ? caught.message : copy.previewError,
+        });
+      });
+    return () => {
+      active = false;
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [copy.previewError, previewName, taskId]);
+
+  const activePreview =
+    preview?.taskId === taskId ? preview : null;
 
   return (
     <main className="workflow-main">
@@ -178,8 +233,6 @@ export default function AnalysisPage() {
           <h1>{copy.title}</h1>
           <p>{copy.description}</p>
         </header>
-
-        <MockNotice />
 
         {!taskId ? (
           <>
@@ -316,35 +369,120 @@ export default function AnalysisPage() {
           </section>
         ) : null}
 
-        {metrics ? (
-          <section className="result-panel result-panel--mock">
+        {analysis ? (
+          <section className="result-panel ai-analysis-panel">
             <div className="panel-heading">
               <div>
-                <span className="mock-label">{zhCN.task11.common.mock}</span>
-                <h2>{copy.mockMetrics}</h2>
+                <span className="section-kicker">{copy.aiKicker}</span>
+                <h2>{copy.aiTitle}</h2>
               </div>
-              <span>{copy.notScientific}</span>
+              <span>{String(summary?.model ?? "kimi-k2.6")}</span>
             </div>
-            <dl className="metric-cards">
-              {Object.entries(metrics).map(([name, value]) => (
-                <div key={name}>
-                  <dt>{name.replaceAll("_", " ")}</dt>
-                  <dd>{String(value)}</dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-        ) : null}
+            <div className="analysis-preview-layout">
+              <div>
+                <h3>{copy.previewTitle}</h3>
+                {activePreview?.url ? (
+                  <Image
+                    alt={copy.previewAriaLabel}
+                    className="analysis-preview-image"
+                    height={1200}
+                    src={activePreview.url}
+                    unoptimized
+                    width={1600}
+                  />
+                ) : (
+                  <div className="analysis-preview-placeholder">
+                    {activePreview?.error ?? copy.previewLoading}
+                  </div>
+                )}
+                <p className="analysis-disclaimer">{copy.previewDisclaimer}</p>
+              </div>
+              <div className="analysis-overview">
+                <h3>{copy.overviewTitle}</h3>
+                <p>{asString(analysis.overview)}</p>
+                {imageQuality ? (
+                  <dl className="analysis-quality">
+                    <div>
+                      <dt>{copy.qualityRating}</dt>
+                      <dd>{copy.qualityLabels[asString(imageQuality.rating) ?? "fair"] ?? asString(imageQuality.rating)}</dd>
+                    </div>
+                    <div>
+                      <dt>{copy.confidence}</dt>
+                      <dd>
+                        {typeof imageQuality.confidence === "number"
+                          ? `${Math.round(imageQuality.confidence * 100)}%`
+                          : zhCN.task11.common.unavailable}
+                      </dd>
+                    </div>
+                  </dl>
+                ) : null}
+                <p>{asString(imageQuality?.summary)}</p>
+              </div>
+            </div>
 
-        {recommendations.length > 0 ? (
-          <section className="result-panel result-panel--mock">
-            <span className="mock-label">{zhCN.task11.common.mock}</span>
-            <h2>{copy.mockRecommendations}</h2>
-            <ul className="recommendation-list">
-              {recommendations.map((recommendation) => (
-                <li key={recommendation}>{recommendation}</li>
-              ))}
-            </ul>
+            {observations ? (
+              <section className="analysis-section">
+                <h3>{copy.observationsTitle}</h3>
+                <dl className="analysis-observations">
+                  {[
+                    [copy.target, observations.target],
+                    [copy.background, observations.background],
+                    [copy.stars, observations.stars],
+                    [copy.noise, observations.noise],
+                    [copy.color, observations.color],
+                  ].map(([label, value]) => (
+                    <div key={String(label)}>
+                      <dt>{String(label)}</dt>
+                      <dd>{asString(value) ?? zhCN.task11.common.unavailable}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            ) : null}
+
+            {issues.length > 0 ? (
+              <section className="analysis-section">
+                <h3>{copy.issuesTitle}</h3>
+                <div className="analysis-issue-list">
+                  {issues.map((issue, index) => (
+                    <article key={`${asString(issue.title)}-${index}`}>
+                      <div>
+                        <h4>{asString(issue.title)}</h4>
+                        <span data-severity={asString(issue.severity)}>
+                          {copy.severityLabels[asString(issue.severity) ?? "low"] ?? asString(issue.severity)}
+                        </span>
+                      </div>
+                      <p>{asString(issue.evidence)}</p>
+                      <strong>{asString(issue.recommendation)}</strong>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {workflow.length > 0 ? (
+              <section className="analysis-section">
+                <h3>{copy.workflowTitle}</h3>
+                <ol className="analysis-workflow">
+                  {workflow.map((step, index) => (
+                    <li key={`${asString(step.step)}-${index}`}>
+                      <h4>{asString(step.step)}</h4>
+                      <p>{asString(step.purpose)}</p>
+                      <strong>{asString(step.guidance)}</strong>
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            ) : null}
+
+            {caveats.length > 0 ? (
+              <section className="analysis-section analysis-caveats">
+                <h3>{copy.caveatsTitle}</h3>
+                <ul>
+                  {caveats.map((caveat) => <li key={caveat}>{caveat}</li>)}
+                </ul>
+              </section>
+            ) : null}
           </section>
         ) : null}
 

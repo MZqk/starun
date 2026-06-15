@@ -14,6 +14,11 @@ import { UploadIcon } from "./Icons";
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 const ACCEPTED_EXTENSION = /\.(fits|fit|fts)$/i;
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 type UploadZoneProps = {
   disabled?: boolean;
   onUploaded: (upload: UploadResponse, file: File) => void;
@@ -44,6 +49,7 @@ export default function UploadZone({
   const mountedRef = useRef(true);
   const [dragging, setDragging] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [fileSize, setFileSize] = useState<number | null>(null);
   const [progress, setProgress] = useState(0);
   const [phase, setPhase] = useState<
     "idle" | "uploading" | "validating" | "ready"
@@ -74,6 +80,7 @@ export default function UploadZone({
       setInspection(null);
       setProgress(0);
       setFileName(file.name);
+      setFileSize(file.size);
 
       if (!ACCEPTED_EXTENSION.test(file.name)) {
         setPhase("idle");
@@ -231,7 +238,10 @@ export default function UploadZone({
       {fileName ? (
         <div className="upload-progress" aria-live="polite">
           <div>
-            <strong>{fileName}</strong>
+            <span className="upload-progress__file">
+              <strong>{fileName}</strong>
+              {fileSize !== null ? <small>{formatBytes(fileSize)}</small> : null}
+            </span>
             <span>
               {phase === "validating"
                 ? copy.validating
@@ -250,6 +260,14 @@ export default function UploadZone({
               type="button"
             >
               {copy.cancel}
+            </button>
+          ) : phase === "ready" ? (
+            <button
+              className="text-button"
+              onClick={() => inputRef.current?.click()}
+              type="button"
+            >
+              {copy.replace}
             </button>
           ) : null}
         </div>

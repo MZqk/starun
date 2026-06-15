@@ -1,5 +1,4 @@
 import hashlib
-import json
 import os
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -12,6 +11,12 @@ from app.agent import build_mock_runner
 from app.agent.contracts import TaskContext
 from app.agent.contracts import AgentEvent
 from app.agent.runner import AgentCancelledError, AgentGuardrailError, EventSink
+from app.analysis import (
+    KimiAnalysisClient,
+    KimiAnalysisError,
+    KimiConfigurationError,
+    render_fits_preview,
+)
 from app.artifacts.store import ArtifactStore
 from app.config import Settings
 from app.db.models import EventLevel, Task, TaskStatus, TaskType
@@ -39,21 +44,65 @@ class AnalysisTaskHandler:
         self._events = TaskEventService(session_factory, clock=clock)
 
     async def run(self, task_id: str) -> HandlerResult:
-        task, inspection, input_metadata = self._load_task(task_id)
+        _, inspection, input_metadata, source_path = self._load_task(task_id)
         self._check_cancelled(task_id)
-        self._set_stage(task_id, "analysis", 10)
-        self._events.append(task_id, EventLevel.INFO, "analysis_started", {"demo": True})
-
-        report = _analysis_report(task, inspection, input_metadata)
+        self._set_stage(task_id, "preview_generation", 10)
+        self._events.append(task_id, EventLevel.INFO, "analysis_started", {})
+        try:
+            preview = render_fits_preview(source_path, inspection.selected_hdu.index)
+        except (OSError, TypeError, ValueError, MemoryError) as exc:
+            raise TaskHandlerError(
+                "preview_generation_failed",
+                "The FITS preview could not be generated.",
+                False,
+            ) from exc
         self._check_cancelled(task_id)
-        self._set_stage(task_id, "analysis_metrics", 60)
+        self._set_stage(task_id, "ai_analysis", 35)
         self._events.append(
             task_id,
             EventLevel.INFO,
-            "analysis_metrics_generated",
-            {"demo": True, "metrics": report["professional_metrics"]},
+            "analysis_preview_generated",
+            {"width": preview.width, "height": preview.height},
         )
+        try:
+            analysis = await KimiAnalysisClient(
+                base_url=self._settings.ai_base_url,
+                api_key=self._settings.ai_api_key,
+                model=self._settings.ai_model,
+                timeout_seconds=self._settings.ai_timeout_seconds,
+            ).analyze(
+                preview_png=preview.data,
+                inspection=inspection,
+                preview_metadata={
+                    "width": preview.width,
+                    "height": preview.height,
+                    "lower_percentile_value": preview.lower_percentile,
+                    "upper_percentile_value": preview.upper_percentile,
+                },
+            )
+        except KimiConfigurationError as exc:
+            raise TaskHandlerError("ai_not_configured", str(exc), False) from exc
+        except KimiAnalysisError as exc:
+            raise TaskHandlerError(
+                "ai_provider_error",
+                str(exc),
+                exc.retryable,
+            ) from exc
 
+        report = {
+            "provider": "kimi",
+            "model": self._settings.ai_model,
+            "input_metadata": input_metadata,
+            "inspection": inspection.model_dump(mode="json"),
+            "preview": {
+                "artifact": "analysis-preview.png",
+                "width": preview.width,
+                "height": preview.height,
+                "lower_percentile_value": preview.lower_percentile,
+                "upper_percentile_value": preview.upper_percentile,
+            },
+            "analysis": analysis.model_dump(mode="json"),
+        }
         task_dir = self._settings.data_root / "tasks" / task_id
         data_root_fd = open_directory_fd(self._settings.data_root, create=True)
         try:
@@ -64,7 +113,11 @@ class AnalysisTaskHandler:
             )
             try:
                 with ArtifactStore.from_directory_fd(task_dir, task_dir_fd) as store:
-                    artifact = store.write_json("analysis-report.json", report)
+                    preview_artifact = store.write_bytes(
+                        "analysis-preview.png",
+                        preview.data,
+                    )
+                    report_artifact = store.write_json("analysis-report.json", report)
             finally:
                 os.close(task_dir_fd)
         finally:
@@ -75,26 +128,36 @@ class AnalysisTaskHandler:
             task_id,
             EventLevel.INFO,
             "analysis_report_written",
-            {"artifact": artifact.model_dump(mode="json"), "demo": True},
+            {
+                "artifacts": [
+                    preview_artifact.model_dump(mode="json"),
+                    report_artifact.model_dump(mode="json"),
+                ],
+                "provider": "kimi",
+                "model": self._settings.ai_model,
+            },
         )
         return HandlerResult(
             result_manifest={
-                "artifacts": [artifact.model_dump(mode="json")],
+                "artifacts": [
+                    preview_artifact.model_dump(mode="json"),
+                    report_artifact.model_dump(mode="json"),
+                ],
                 "inspection": inspection.model_dump(mode="json"),
                 "summary": {
-                    "demo": True,
-                    "professional_metrics": report["professional_metrics"],
-                    "recommendations": report["recommendations"],
-                    "parameter_plan": report["parameter_plan"],
+                    "provider": "kimi",
+                    "model": self._settings.ai_model,
+                    "preview": report["preview"],
+                    "analysis": analysis.model_dump(mode="json"),
                 },
-                "demo": True,
+                "demo": False,
             }
         )
 
     def _load_task(
         self,
         task_id: str,
-    ) -> tuple[Task, FitsInspection, dict[str, Any]]:
+    ) -> tuple[Task, FitsInspection, dict[str, Any], Path]:
         with self._session_factory() as session:
             task = session.get(Task, task_id)
             if task is None or task.type is not TaskType.ANALYSIS:
@@ -111,6 +174,7 @@ class AnalysisTaskHandler:
                 task,
                 FitsInspection.model_validate(raw_inspection),
                 _source_metadata(source_path),
+                source_path,
             )
 
     def _check_cancelled(self, task_id: str) -> None:
@@ -256,46 +320,6 @@ class ProcessingTaskHandler:
             task.stage = stage
             task.progress = progress
             session.commit()
-
-
-def _analysis_report(
-    task: Task,
-    inspection: FitsInspection,
-    input_metadata: dict[str, Any],
-) -> dict[str, Any]:
-    metadata = {
-        "style": task.style.value if task.style is not None else None,
-        "input_metadata": input_metadata,
-        "selected_hdu": task.selected_hdu,
-        "inspection": inspection.model_dump(mode="json"),
-    }
-    digest = hashlib.sha256(
-        json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode()
-    ).digest()
-    metrics = {
-        "snr": round(8.0 + int.from_bytes(digest[0:2], "big") / 65535 * 24.0, 3),
-        "fwhm": round(1.5 + int.from_bytes(digest[2:4], "big") / 65535 * 3.0, 3),
-        "ellipticity": round(0.05 + int.from_bytes(digest[4:6], "big") / 65535 * 0.35, 3),
-        "star_count": 150 + int.from_bytes(digest[6:8], "big") % 4851,
-    }
-    return {
-        "demo": True,
-        "notice": "Mock/demo analysis; not a scientific measurement.",
-        "input_metadata": input_metadata,
-        "inspection": inspection.model_dump(mode="json"),
-        "professional_metrics": metrics,
-        "recommendations": [
-            "Use a moderate nonlinear stretch while preserving the background.",
-            "Apply conservative denoise before local sharpening.",
-            "Verify color balance against the persisted FITS statistics.",
-        ],
-        "parameter_plan": {
-            "stretch": round(0.8 + metrics["snr"] / 100, 3),
-            "denoise": round(max(0.1, 0.5 - metrics["snr"] / 100), 3),
-            "sharpen": round(max(0.1, 0.6 - metrics["fwhm"] / 10), 3),
-            "saturation": 1.0,
-        },
-    }
 
 
 def _is_cancelled(task: Task) -> bool:
