@@ -698,7 +698,7 @@ describe("Task 11 flows", () => {
       style: "balanced",
       lastStatus: "completed",
       createdAt: "2026-06-14T09:00:00Z",
-      expiresAt: "2026-06-15T11:00:00Z",
+      expiresAt: "2036-06-15T11:00:00Z",
       resultAvailable: true,
     });
     api.getTask.mockResolvedValue(
@@ -707,7 +707,7 @@ describe("Task 11 flows", () => {
         type: "processing",
         status: "completed",
         style: "balanced",
-        expires_at: "2026-06-15T11:00:00Z",
+        expires_at: "2036-06-15T11:00:00Z",
         result: {
           manifest_available: true,
           summary: { demo: true },

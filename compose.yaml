@@ -1,9 +1,12 @@
 services:
   api:
     build: ./api
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     environment:
       STARUN_DATA_ROOT: /data
+      STARUN_DATABASE_URL: sqlite:////data/starun.db
+    env_file:
+      - ./api/.env 
     volumes:
       - starun-data:/data
     ports:
@@ -12,6 +15,7 @@ services:
     build: ./web
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      STARUN_API_PROXY_TARGET: http://api:8000
     ports:
       - "3000:3000"
 

@@ -334,6 +334,9 @@ export function resolveApiBaseUrl(): string {
   ) {
     return "http://localhost:8000";
   }
+  if (typeof window !== "undefined" && !process.env.VITEST) {
+    return window.location.origin;
+  }
   throw new Error(
     "NEXT_PUBLIC_API_BASE_URL is required outside browser development.",
   );
