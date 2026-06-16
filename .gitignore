@@ -50,6 +50,12 @@ pnpm-debug.log*
 .vercel/
 .playwright-mcp/
 
-# --- AI Agents ---
+# --- AI Agents & OpenSpec ---
 .claude/
 .gemini/
+.codex/
+.agent/
+openspec/
+
+# --- Temporary Screenshots ---
+starun-home-*.png
