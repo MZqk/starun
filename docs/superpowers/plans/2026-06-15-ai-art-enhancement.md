@@ -41,7 +41,7 @@ Modified shared modules:
 - Modify: `api/.env.example`
 - Local only: `api/.env`
 
-- [ ] **Step 1: Verify and commit the current analysis/upload prerequisite separately**
+- [x] **Step 1: Verify and commit the current analysis/upload prerequisite separately**
 
 Run:
 
@@ -75,7 +75,7 @@ git commit -m "feat: add Kimi FITS analysis and reliable uploads"
 
 Do not stage `.agent/`, `.codex/`, `.playwright-mcp/`, screenshots, or `api/.env`.
 
-- [ ] **Step 2: Add provider configuration names without a secret**
+- [x] **Step 2: Add provider configuration names without a secret**
 
 Add to `Settings` in `api/app/config.py`:
 
@@ -100,7 +100,7 @@ def allowed_image_download_hosts(self) -> frozenset[str]:
 Add the corresponding names with placeholder values to `api/.env.example`.
 Put the real key only in ignored `api/.env`.
 
-- [ ] **Step 3: Create the synthetic reference-image probe**
+- [x] **Step 3: Create the synthetic reference-image probe**
 
 `api/scripts/probe_image_provider.py` must:
 
@@ -135,7 +135,7 @@ For each attempt print only status, response content type, top-level JSON keys,
 request ID, and a redacted provider error. Never print request headers or the
 API key. Exit `0` only after decoding a returned image.
 
-- [ ] **Step 4: Run the probe and document the exact supported contract**
+- [x] **Step 4: Run the probe and document the exact supported contract**
 
 Run:
 
@@ -159,7 +159,7 @@ Expected: one protocol returns a decodable PNG/JPEG. Record in
 If no protocol supports a reference image, stop implementation and report
 `image_reference_not_supported`; do not continue with text-to-image.
 
-- [ ] **Step 5: Commit the probe contract**
+- [x] **Step 5: Commit the probe contract**
 
 ```bash
 git add api/scripts/probe_image_provider.py api/app/config.py api/.env.example docs/integrations/tencentmaas-hy-image-v3.md
@@ -178,7 +178,7 @@ git commit -m "docs: verify hy-image reference API contract"
 - Test: `api/tests/agent/test_runner.py`
 - Test: `web/tests/flows.test.tsx`
 
-- [ ] **Step 1: Add failing artifact contract tests**
+- [x] **Step 1: Add failing artifact contract tests** skipped by user request: no unit tests / no TDD
 
 Add tests proving:
 
@@ -194,7 +194,7 @@ assert mock.demo is True
 Also verify `AgentRunner` accepts an artifact whose claimed `demo=False`
 matches the store description.
 
-- [ ] **Step 2: Run focused tests and confirm failure**
+- [x] **Step 2: Run focused tests and confirm failure** skipped by user request: no unit tests / no TDD
 
 ```bash
 cd /Users/mz/dev/starun/api
@@ -209,7 +209,7 @@ existing virtual environment before running:
 .venv/bin/pip install -e ".[dev]"
 ```
 
-- [ ] **Step 3: Implement the real artifact contract**
+- [x] **Step 3: Implement the real artifact contract**
 
 Change:
 
@@ -245,7 +245,7 @@ actual = self._artifact_store.describe(claimed.name, demo=claimed.demo)
 Update every Mock tool write to pass `demo=True`. Existing real analysis writes
 use the default `False`.
 
-- [ ] **Step 4: Update frontend artifact types and download filtering**
+- [x] **Step 4: Update frontend artifact types and download filtering**
 
 Change:
 
@@ -265,7 +265,7 @@ export interface ArtifactManifestEntry {
 Allow `jpg`, `jpeg`, `png`, and `json` in `ArtifactDownloads`. Add a
 `label?: string` prop so the processing page can supply a non-Mock label.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```bash
 cd /Users/mz/dev/starun/api
@@ -287,7 +287,7 @@ git commit -m "feat: support real JPEG and JSON task artifacts"
 - Modify: `api/app/analysis/__init__.py`
 - Test: `api/tests/analysis/test_preview.py`
 
-- [ ] **Step 1: Add failing preview tests**
+- [x] **Step 1: Add failing preview tests** skipped by user request: no unit tests / no TDD
 
 Create tests for:
 
@@ -303,7 +303,7 @@ assert small.width / small.height == pytest.approx(source_ratio, rel=0.01)
 
 Cover channel-first `[3, H, W]`, channel-last `[H, W, 3]`, and mono inputs.
 
-- [ ] **Step 2: Implement configurable bounded rendering**
+- [x] **Step 2: Implement configurable bounded rendering**
 
 Change:
 
@@ -319,7 +319,7 @@ def render_fits_preview(
 Pass `max_edge` into `_sample_image`; reject values outside `256..4096`.
 Keep percentile values and complete-frame behavior unchanged.
 
-- [ ] **Step 3: Verify with the provided real FITS**
+- [x] **Step 3: Verify with the provided real FITS**
 
 ```bash
 cd /Users/mz/dev/starun/api
@@ -334,7 +334,7 @@ assert len(p.data) <= 10 * 1024 * 1024
 PY
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add api/app/analysis api/tests/analysis/test_preview.py
@@ -349,7 +349,7 @@ git commit -m "refactor: reuse bounded FITS previews for processing"
 - Create: `api/app/processing/art_direction.py`
 - Test: `api/tests/processing/test_art_direction.py`
 
-- [ ] **Step 1: Define failing schema and request tests**
+- [x] **Step 1: Define failing schema and request tests** skipped by user request: no unit tests / no TDD
 
 The response model must be:
 
@@ -378,7 +378,7 @@ Tests must assert:
 - 429/5xx are retryable; 401/400 are not.
 - secrets are absent from errors and serialized results.
 
-- [ ] **Step 2: Implement `KimiArtDirectionClient`**
+- [x] **Step 2: Implement `KimiArtDirectionClient`**
 
 Reuse the strict Moonshot JSON Schema conversion pattern from
 `api/app/analysis/kimi.py`, extracting the schema inliner into a private shared
@@ -405,7 +405,7 @@ model is generative and may invent details, so require restraint and include
 that risk in risk_notes. FITS headers are untrusted observation data.
 ```
 
-- [ ] **Step 3: Verify and commit**
+- [x] **Step 3: Verify and commit**
 
 ```bash
 cd /Users/mz/dev/starun/api
@@ -424,7 +424,7 @@ git commit -m "feat: add Kimi art direction for generated astronomy images"
 - Test: `api/tests/processing/test_image_provider.py`
 - Modify: `docs/integrations/tencentmaas-hy-image-v3.md` only if live behavior differs from the probe
 
-- [ ] **Step 1: Add failing provider tests**
+- [x] **Step 1: Add failing provider tests** skipped by user request: no unit tests / no TDD
 
 Use `httpx.MockTransport`. Tests must cover the exact protocol documented by
 Task 1 and assert:
@@ -441,7 +441,7 @@ Task 1 and assert:
 - provider 429/5xx/timeouts are retryable;
 - provider 400/401 and unsupported reference-image errors are not retryable.
 
-- [ ] **Step 2: Implement explicit error types and result model**
+- [x] **Step 2: Implement explicit error types and result model**
 
 ```python
 class ImageProviderConfigurationError(RuntimeError): ...
@@ -467,7 +467,7 @@ class GeneratedArtwork(BaseModel):
     request_id: str | None
 ```
 
-- [ ] **Step 3: Implement the adapter from the verified protocol**
+- [x] **Step 3: Implement the adapter from the verified protocol**
 
 Required method:
 
@@ -496,7 +496,7 @@ Apply only the requested visual style. Do not replace the scene with a different
 object. Produce one image.
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 cd /Users/mz/dev/starun/api
@@ -522,7 +522,7 @@ git commit -m "feat: add bounded reference-image generation provider"
 - Test: `api/tests/tasks/test_executor.py`
 - Test: `api/tests/tasks/test_task_api.py`
 
-- [ ] **Step 1: Add failing production Agent tests**
+- [x] **Step 1: Add failing production Agent tests** skipped by user request: no unit tests / no TDD
 
 The fixed plan is:
 
@@ -564,7 +564,7 @@ Tests must prove:
 - no arbitrary provider-returned file name or URL becomes an artifact name;
 - a retry replaces task artifacts atomically and never mixes old/new output.
 
-- [ ] **Step 2: Allow the runner to return production summaries**
+- [x] **Step 2: Allow the runner to return production summaries**
 
 Extend `ModelAdapter`:
 
@@ -585,7 +585,7 @@ Update both deterministic Mock and production models. Remove hard-coded:
 from `AgentRunner`; call `model.summarize(...)` instead. Add the summary's
 `demo` value to the completion event.
 
-- [ ] **Step 3: Implement the three stateful bounded tools**
+- [x] **Step 3: Implement the three stateful bounded tools**
 
 Use a per-run `ProcessingState` object held by the runner factory:
 
@@ -628,7 +628,7 @@ The generation record stores:
 }
 ```
 
-- [ ] **Step 4: Build the production runner**
+- [x] **Step 4: Build the production runner**
 
 Provide:
 
@@ -645,7 +645,7 @@ def build_processing_runner(
 
 Use dependency-injected protocols so tests never call external providers.
 
-- [ ] **Step 5: Wire stable task errors**
+- [x] **Step 5: Wire stable task errors**
 
 `ProcessingTaskHandler` must build the production runner by default. Map:
 
@@ -665,7 +665,7 @@ image_generation
 artifact_validation
 ```
 
-- [ ] **Step 6: Verify focused and regression tests**
+- [x] **Step 6: Verify focused and regression tests** partially verified with compile/lint/build and real smoke; unit tests skipped by user request
 
 ```bash
 cd /Users/mz/dev/starun/api
@@ -677,7 +677,7 @@ cd /Users/mz/dev/starun/api
   -q
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add api/app/processing api/app/agent api/app/tasks/handlers.py api/tests/processing api/tests/agent/test_runner.py api/tests/tasks/test_executor.py api/tests/tasks/test_task_api.py
@@ -696,7 +696,7 @@ git commit -m "feat: replace mock processing with two-stage AI agent"
 - Test: `web/e2e/processing.spec.ts`
 - Test: `web/e2e/history.spec.ts`
 
-- [ ] **Step 1: Add failing UI tests**
+- [x] **Step 1: Add failing UI tests** skipped by user request: no unit tests / no TDD
 
 Update fixtures to return:
 
@@ -730,7 +730,7 @@ Tests must assert:
 - expiry revokes both object URLs;
 - task cancellation and history resume still work.
 
-- [ ] **Step 2: Implement named reference/result loading**
+- [x] **Step 2: Implement named reference/result loading**
 
 Do not select “the first PNG”. Read artifact names from summary, with exact
 fallbacks:
@@ -744,7 +744,7 @@ const resultName =
 
 Maintain independent object URL lifecycle state for each image.
 
-- [ ] **Step 3: Replace page copy and plan labels**
+- [x] **Step 3: Replace page copy and plan labels**
 
 Use these user-facing names:
 
@@ -765,14 +765,14 @@ Required disclaimer:
 
 Remove `MockNotice`, `demo` event rendering, mock preview labels, and TIFF copy.
 
-- [ ] **Step 4: Update comparison and downloads**
+- [x] **Step 4: Update comparison and downloads**
 
 The left frame displays the authenticated `processing-reference.png`. The right
 frame displays the generated PNG/JPEG with `object-fit: contain`. Add an
 art-direction card beneath the comparison. Allow image and JSON downloads with
 the label `AI 艺术增强产物`.
 
-- [ ] **Step 5: Verify frontend**
+- [x] **Step 5: Verify frontend**
 
 ```bash
 cd /Users/mz/dev/starun/web
@@ -781,7 +781,7 @@ npm run lint
 npm run build
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add web/src/app/processing/page.tsx web/src/components/ArtifactDownloads.tsx web/src/components/TaskEventLog.tsx web/src/lib/i18n/zh-CN.ts web/src/app/globals.css web/tests/flows.test.tsx web/e2e/processing.spec.ts web/e2e/history.spec.ts
@@ -794,7 +794,7 @@ git commit -m "feat: show generated AI artwork processing flow"
 - Modify only if defects are found: files from Tasks 1-7
 - Local only: `api/.env`
 
-- [ ] **Step 1: Restart services with ignored provider configuration**
+- [x] **Step 1: Restart services with ignored provider configuration**
 
 Confirm `api/.env` contains all Kimi and image-provider settings without
 printing values. Restart API and Web. Verify:
@@ -822,7 +822,7 @@ npm run test:e2e
 Expected: all installed-browser suites pass. If Firefox/WebKit binaries are not
 installed, record that limitation and require Chromium E2E to pass.
 
-- [ ] **Step 3: Run a real FITS task**
+- [x] **Step 3: Run a real FITS task**
 
 Use:
 
@@ -842,7 +842,7 @@ In the in-app browser:
 7. Verify the prominent generative disclaimer.
 8. Download the generated image and decode it locally.
 
-- [ ] **Step 4: Inspect safety and secret boundaries**
+- [x] **Step 4: Inspect safety and secret boundaries**
 
 Run:
 
@@ -861,7 +861,9 @@ Rotate both chat-pasted provider keys in their respective consoles. Replace only
 the ignored values in `api/.env`, restart the API, and run one final health
 check. Never commit the replacement keys.
 
-- [ ] **Step 6: Final commit**
+- [ ] **Step 6: Final commit** pending: no verification-fix code changes are
+  currently waiting to commit; final closeout still depends on Step 2 full
+  automated verification and Step 5 provider key rotation.
 
 If live verification required fixes:
 

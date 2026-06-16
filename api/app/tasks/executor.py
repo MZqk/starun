@@ -372,7 +372,12 @@ class SerialTaskExecutor:
                         task_id,
                         EventLevel.ERROR,
                         event_type,
-                        {"error_code": error_code, **(payload or {})},
+                        {
+                            "error_code": error_code,
+                            "message": error_message,
+                            "retryable": retryable,
+                            **(payload or {}),
+                        },
                     )
                 else:
                     delete_requested = self._cancel_in_session_if_requested(

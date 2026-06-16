@@ -106,3 +106,9 @@ class ModelAdapter(Protocol):
     async def plan(self, context: TaskContext) -> AgentPlan: ...
 
     async def evaluate(self, observation: ToolResult) -> float: ...
+
+    async def summarize(
+        self,
+        context: TaskContext,
+        observation: ToolResult,
+    ) -> dict[str, JsonValue]: ...

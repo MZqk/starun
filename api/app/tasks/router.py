@@ -29,6 +29,14 @@ from app.usage.service import get_daily_usage
 router = APIRouter(tags=["tasks"])
 PUBLIC_ERROR_MESSAGES = {
     "agent_guardrail": "Agent output was rejected.",
+    "ai_not_configured": "AI provider credentials are not configured.",
+    "ai_provider_error": "AI provider request failed.",
+    "art_direction_failed": "AI art direction generation failed.",
+    "image_provider_error": "Image generation provider request failed.",
+    "image_provider_invalid_response": "Image generation provider returned an invalid response.",
+    "image_provider_missing_image": "Image generation provider did not return an image.",
+    "image_provider_not_configured": "Image generation provider credentials are not configured.",
+    "image_provider_unreachable": "Image generation provider is temporarily unreachable.",
     "restart_interrupted": "Task execution was interrupted by an application restart.",
     "resource_error": "The task could not acquire the required resources.",
     "resource_exhausted": "The task could not acquire the required resources.",
@@ -62,9 +70,17 @@ EVENT_KEY_ALLOWLISTS = {
     "restart_interrupted": {"error_code"},
     "task_cancelled": set(),
     "task_completed": {"progress"},
-    "task_failed": {"diagnostic_id", "error_code"},
+    "task_failed": {"diagnostic_id", "error_code", "message", "retryable"},
     "task_started": {"task_type"},
     "task_timeout": {"error_code"},
+}
+DETAILED_TASK_ERROR_CODES = {
+    "ai_provider_error",
+    "art_direction_failed",
+    "image_provider_error",
+    "image_provider_invalid_response",
+    "image_provider_missing_image",
+    "image_provider_unreachable",
 }
 WINDOWS_DRIVE_PATH = re.compile(r"^[A-Za-z]:[\\/]")
 TRAVERSAL_PATH = re.compile(r"(^|[\\/])\.\.([\\/]|$)")
@@ -144,7 +160,7 @@ def _task_detail(task: Task) -> TaskDetailResponse:
         finished_at=task.finished_at,
         expires_at=task.expires_at,
         error_code=task.error_code,
-        message=PUBLIC_ERROR_MESSAGES.get(task.error_code or ""),
+        message=_task_error_message(task),
         retryable=task.retryable,
         quota_charged=task.quota_charged,
         cleanup_pending=task.cleanup_pending,
@@ -164,6 +180,19 @@ def _task_detail(task: Task) -> TaskDetailResponse:
             else None
         ),
     )
+
+
+def _task_error_message(task: Task) -> str | None:
+    error_code = task.error_code or ""
+    if (
+        error_code in DETAILED_TASK_ERROR_CODES
+        and isinstance(task.error_message, str)
+        and task.error_message
+    ):
+        safe = _safe_value(task.error_message, _internal_paths(task))
+        if isinstance(safe, str):
+            return safe[:500]
+    return PUBLIC_ERROR_MESSAGES.get(error_code)
 
 
 def _is_sensitive_key(key: str) -> bool:
@@ -230,6 +259,21 @@ def _safe_payload(
         if not _is_sensitive_key(key)
         if (safe_item := _safe_value(item, internal_paths)) is not _DROP
     }
+
+
+def _event_payload(task: Task, event: TaskEvent) -> dict[str, object]:
+    payload = dict(event.payload)
+    if event.event_type == "task_failed":
+        message = _task_error_message(task)
+        if message:
+            payload.setdefault("message", message)
+        if isinstance(task.retryable, bool):
+            payload.setdefault("retryable", task.retryable)
+    return _safe_payload(
+        payload,
+        _internal_paths(task),
+        allowed_keys=EVENT_KEY_ALLOWLISTS.get(event.event_type),
+    )
 
 
 def _internal_paths(task: Task) -> set[str]:
@@ -390,11 +434,7 @@ def get_task_events(
                 sequence=event.sequence,
                 level=event.level.value,
                 event_type=event.event_type,
-                payload=_safe_payload(
-                    event.payload,
-                    _internal_paths(task),
-                    allowed_keys=EVENT_KEY_ALLOWLISTS.get(event.event_type),
-                ),
+                payload=_event_payload(task, event),
                 created_at=event.created_at,
             )
             for event in page

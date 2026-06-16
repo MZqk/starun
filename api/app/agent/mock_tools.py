@@ -104,8 +104,16 @@ class _ExportTool:
             for name in names
         }
         try:
-            tiff = self._store.write_bytes("result-demo.tiff", _encode_tiff(image))
-            png = self._store.write_bytes("preview-demo.png", _encode_png(image))
+            tiff = self._store.write_bytes(
+                "result-demo.tiff",
+                _encode_tiff(image),
+                demo=True,
+            )
+            png = self._store.write_bytes(
+                "preview-demo.png",
+                _encode_png(image),
+                demo=True,
+            )
             manifest = self._store.write_json(
                 "manifest.json",
                 {
@@ -116,6 +124,7 @@ class _ExportTool:
                     "demo": True,
                     "notice": WATERMARK,
                 },
+                demo=True,
             )
         except BaseException:
             self._rollback(names, previous)

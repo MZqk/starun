@@ -8,7 +8,7 @@ export const zhCN = {
       titleEmphasis: "专业判断",
       fullTitle: "让每一帧深空数据，得到专业判断",
       description:
-        "为有经验的天文摄影爱好者解析已校准、已叠加的线性 FITS，获得专业后期建议，或交给 Agent 无人值守地完成演示出图。",
+        "为有经验的天文摄影爱好者解析已校准、已叠加的线性 FITS，获得专业后期建议，或交给 Agent 自动生成艺术增强成片。",
       analysisCta: "开始分析",
       processingCta: "自动出图",
     },
@@ -24,25 +24,25 @@ export const zhCN = {
       quota: "每日最多 5 次任务，分析与自动出图共享",
     },
     mockNotice: {
-      title: "当前为 Mock 里程碑",
-      body: "基础 FITS 信息来自真实解析；专业指标、处理建议、Agent 流程与下载产物均为 Mock 演示结果，不代表真实专业算法输出。",
+      title: "当前能力边界",
+      body: "当前首版聚焦 FITS：程序提取元数据、基础统计和参考预览，AI 负责专业解读、艺术指导与参考图约束下的自动出图。",
     },
     features: {
       ariaLabel: "核心能力",
       heading: "从判断到成片，保持过程清晰",
       description:
-        "先看懂数据，再决定处理方式。所有演示结果都会明确标识能力边界。",
+        "先看懂数据，再决定处理方式。所有 AI 输出都会明确标识能力边界。",
       analysis: {
         title: "专业分析",
         description:
-          "查看 FITS 头、HDU、尺寸、位深与基础统计，并获得分步骤的 Mock 专业指标、处理方案和推荐参数。",
+          "查看 FITS 头、HDU、尺寸、位深与基础统计，并获得分步骤的专业解读、处理方案和推荐参数。",
         link: "查看专业分析",
         tags: ["FITS 解析", "处理建议", "参数报告"],
       },
       processing: {
         title: "AI 自动出图",
         description:
-          "选择真实、平衡或艺术风格后，由 Mock Agent 无人值守地执行演示计划，并提供 PNG 预览与 TIFF 演示产物。",
+          "选择真实、平衡或艺术风格后，由 AI Agent 生成参考预览、艺术指导和最终增强图。",
         link: "进入自动出图",
         tags: ["无人值守", "三种风格"],
       },
@@ -64,11 +64,11 @@ export const zhCN = {
         },
         {
           title: "检查报告或选择风格",
-          description: "查看分析建议，或选择真实、平衡、艺术风格启动演示流程。",
+          description: "查看分析建议，或选择真实、平衡、艺术风格启动自动出图流程。",
         },
         {
-          title: "获取报告或演示下载",
-          description: "阅读结构化报告，或查看带 Mock 标识的预览与下载结果。",
+          title: "获取报告或处理产物",
+          description: "阅读结构化报告，或查看参考预览、生成图与处理记录。",
         },
       ],
     },
@@ -76,7 +76,7 @@ export const zhCN = {
       heading: "数据保留与资源边界",
       body: "上传文件与服务端产物将在 24 小时后删除。本地历史只保存任务摘要；服务端文件过期后，历史记录仍可能存在，但结果不可继续下载。",
       resource:
-        "首个里程碑运行在有限 CPU、内存和磁盘资源上，不承诺对所有合法 FITS 结构或 500 MB 文件都能完成演示处理。",
+        "首个里程碑运行在有限 CPU、内存和磁盘资源上，不承诺对所有合法 FITS 结构或 500 MB 文件都能完成处理。",
     },
   },
   task11: {
@@ -215,12 +215,12 @@ export const zhCN = {
     },
     processing: {
       kicker: "AI 自动出图",
-      title: "选择一种风格，查看可追踪的 Mock Agent 处理过程",
+      title: "选择一种风格，生成 AI 艺术增强成片",
       description:
-        "当前版本使用确定性演示工具生成预览和导出文件。所有计划、评分与成片持续标注为 Mock。",
+        "系统会从 FITS 生成参考预览，由 Kimi 给出艺术指导，再调用图片生成模型输出参考图约束下的成片。",
       unnamedFile: "未命名 FITS",
       analysisSourceFile: "分析任务源文件",
-      previewError: "Mock 预览加载失败。",
+      previewError: "预览加载失败。",
       sourceKicker: "已选择分析源",
       sourceDescription: "将复用仍在有效期内的分析任务源文件，不需要再次上传。",
       styleLegend: "处理风格",
@@ -231,13 +231,13 @@ export const zhCN = {
         artistic: { label: "艺术", description: "更强的演示色彩表达" },
       },
       creating: "正在创建任务…",
-      create: "开始 Mock 自动出图",
+      create: "开始 AI 自动出图",
       styleNotice: "仅能选择一个处理风格，默认使用“平衡”。",
       createError: "任务创建失败，请稍后重试。",
       cancelError: "取消失败。",
       restoring: "正在恢复任务状态…",
-      planAriaLabel: "Mock Agent 处理计划",
-      planLabel: "Mock Agent",
+      planAriaLabel: "AI Agent 处理计划",
+      planLabel: "AI Agent",
       planTitle: "处理计划",
       planUpdated: "已从工具事件更新",
       planWaiting: "等待 Agent 工具事件",
@@ -245,11 +245,19 @@ export const zhCN = {
       before: "处理前",
       sourcePreviewAriaLabel: "真实 FITS 元数据源预览",
       rawFits: "原始线性 FITS",
-      previewLabel: "Mock 演示预览",
-      previewAriaLabel: "Mock 演示处理后预览",
-      previewLoading: "正在认证加载 PNG 演示预览…",
+      previewLabel: "AI 生成成片",
+      previewAriaLabel: "AI 生成处理后预览",
+      previewLoading: "正在加载处理预览…",
       balancedStyle: "平衡风格",
-      demoDisclaimer: "Mock 演示输出，非科学处理结果",
+      disclaimer: "AI 自动出图是艺术增强结果，不可替代科学后期与真实性校验。",
+      directionKicker: "生成说明",
+      directionTitle: "AI 艺术指导",
+      downloadLabel: "AI 自动出图产物",
+      toolNames: {
+        "processing.prepare_reference": "生成 FITS 参考预览",
+        "processing.plan_art_direction": "Kimi 生成艺术指导",
+        "processing.generate_artwork": "图片模型生成成片",
+      } as Record<string, string>,
       expiredTitle: "处理结果已过期",
       resultUnavailable: "预览与下载结果已不可用。",
       sourceMetadata: (hdu: number | string, shape: string, range: string) =>
@@ -267,7 +275,7 @@ export const zhCN = {
       empty: "任务事件将在这里按顺序显示。",
     },
     downloads: {
-      label: "Mock 演示产物下载",
+      label: "处理产物下载",
       title: "导出文件",
       preparing: "准备下载…",
       action: (name: string) => `下载 ${name}`,
@@ -289,7 +297,7 @@ export const zhCN = {
       emptyDescription: "创建分析或自动出图任务后，状态摘要会写入当前浏览器。",
       upload: "上传 FITS",
       analysisType: "专业分析",
-      processingType: "Mock 自动出图",
+      processingType: "AI 自动出图",
       createdAt: "创建时间",
       style: "风格",
       result: "结果",
@@ -302,6 +310,6 @@ export const zhCN = {
   },
   footer: {
     note: "Starun · 专业但不复杂",
-    boundary: "FITS only · Mock milestone",
+    boundary: "FITS only · AI preview milestone",
   },
 } as const;

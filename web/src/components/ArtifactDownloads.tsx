@@ -6,13 +6,15 @@ import { zhCN } from "../lib/i18n/zh-CN";
 
 type ArtifactDownloadsProps = {
   artifacts: string[];
+  label?: string;
   taskId: string;
 };
 
-const SUPPORTED_ARTIFACT = /\.(png|tiff?)$/i;
+const SUPPORTED_ARTIFACT = /\.(jpe?g|json|png|tiff?)$/i;
 
 export default function ArtifactDownloads({
   artifacts,
+  label,
   taskId,
 }: ArtifactDownloadsProps) {
   const copy = zhCN.task11.downloads;
@@ -56,7 +58,7 @@ export default function ArtifactDownloads({
   return (
     <section className="artifact-downloads" aria-labelledby="downloads-title">
       <div>
-        <span className="mock-label">{copy.label}</span>
+        <span className="section-kicker">{label ?? copy.label}</span>
         <h2 id="downloads-title">{copy.title}</h2>
       </div>
       <div className="artifact-downloads__actions">

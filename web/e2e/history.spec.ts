@@ -6,9 +6,10 @@ import {
 } from "./fixtures/helpers";
 
 test("history resumes polling after navigation and refresh", async ({ page }) => {
+  test.setTimeout(120_000);
   await page.goto("/processing");
   await uploadFits(page);
-  await page.getByRole("button", { name: "开始 Mock 自动出图" }).click();
+  await page.getByRole("button", { name: "开始 AI 自动出图" }).click();
   await waitForHistoryEntry(page, "starun-e2e.fits");
 
   await page.goto("/history");
@@ -32,7 +33,7 @@ test("history resumes polling after navigation and refresh", async ({ page }) =>
   await expect(page.getByText("处理中")).toBeVisible();
   await expect.poll(() => taskRequests).toBeGreaterThanOrEqual(2);
   await expect.poll(() => eventRequests).toBeGreaterThanOrEqual(2);
-  await expect(page.getByText("已完成")).toBeVisible();
+  await expect(page.getByText("已完成")).toBeVisible({ timeout: 90_000 });
 });
 
 test("an expired result remains as a local summary", async ({ page }) => {
@@ -44,7 +45,7 @@ test("an expired result remains as a local summary", async ({ page }) => {
     lastStatus: "completed",
     createdAt: "2025-01-01T00:00:00.000Z",
     expiresAt: "2025-01-02T00:00:00.000Z",
-    summary: { demo: true, qualityScore: 0.9 },
+    summary: { demo: false, qualityScore: 0.9 },
     resultAvailable: true,
     updatedAt: "2025-01-01T00:01:00.000Z",
   });

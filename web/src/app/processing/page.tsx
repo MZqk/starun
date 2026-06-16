@@ -7,7 +7,6 @@ import {
   useState,
 } from "react";
 import ArtifactDownloads from "../../components/ArtifactDownloads";
-import MockNotice from "../../components/MockNotice";
 import TaskEventLog from "../../components/TaskEventLog";
 import TaskStatusPanel from "../../components/TaskStatusPanel";
 import UploadZone from "../../components/UploadZone";
@@ -26,19 +25,12 @@ import { zhCN } from "../../lib/i18n/zh-CN";
 const historyRepository = new TaskHistoryRepository();
 const STYLE_VALUES: ProcessingStyle[] = ["realistic", "balanced", "artistic"];
 const FALLBACK_AGENT_STEPS = [
-  "mock.inspect",
-  "mock.stretch",
-  "mock.denoise",
-  "mock.sharpen",
-  "mock.color",
-  "mock.evaluate",
-  "mock.export",
+  "processing.prepare_reference",
+  "processing.plan_art_direction",
+  "processing.generate_artwork",
 ] as const;
 
-function stringPayload(
-  event: TaskEventResponse,
-  key: string,
-): string | null {
+function stringPayload(event: TaskEventResponse, key: string): string | null {
   const value = event.payload[key];
   return typeof value === "string" ? value : null;
 }
@@ -72,6 +64,10 @@ function objectValue(value: unknown): JsonObject | null {
     : null;
 }
 
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
 function queryValue(name: string): string | null {
   if (typeof window === "undefined") return null;
   return new URLSearchParams(window.location.search).get(name);
@@ -88,14 +84,14 @@ export default function ProcessingPage() {
   const [creating, setCreating] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [localPersistenceError, setLocalPersistenceError] = useState<
-    string | null
-  >(null);
+  const [localPersistenceError, setLocalPersistenceError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
-  const [preview, setPreview] = useState<{
+  const [artifactImages, setArtifactImages] = useState<{
     taskId: string;
-    url: string | null;
-    error: string | null;
+    referenceUrl: string | null;
+    resultUrl: string | null;
+    referenceError: string | null;
+    resultError: string | null;
   } | null>(null);
   const {
     task,
@@ -130,47 +126,65 @@ export default function ProcessingPage() {
     };
   }, [copy.analysisSourceFile]);
 
-  const previewName =
+  const summary = objectValue(task?.result.summary);
+  const resultFresh =
     task?.status === "completed" &&
-    (task.expires_at === null ||
-      new Date(task.expires_at).getTime() > currentTime)
-      ? task.result.artifacts.find((name) => /\.png$/i.test(name)) ?? null
-      : null;
+    (task.expires_at === null || new Date(task.expires_at).getTime() > currentTime);
+  const referenceArtifactName = resultFresh
+    ? stringValue(summary?.reference_artifact) ??
+      task!.result.artifacts.find((name) => name === "processing-reference.png") ??
+      null
+    : null;
+  const resultArtifactName = resultFresh
+    ? stringValue(summary?.result_artifact) ??
+      task!.result.artifacts.find((name) => /^generated-artwork\.(png|jpe?g)$/i.test(name)) ??
+      null
+    : null;
 
   useEffect(() => {
-    if (!taskId || !previewName) {
-      return;
-    }
+    if (!taskId || (!referenceArtifactName && !resultArtifactName)) return;
     let active = true;
-    let objectUrl: string | null = null;
+    const objectUrls: string[] = [];
     const controller = new AbortController();
-    void getApiClient()
-      .downloadArtifact(taskId, previewName, { signal: controller.signal })
-      .then((artifact) => {
-        if (!active) return;
-        objectUrl = URL.createObjectURL(artifact.blob);
-        setPreview({ taskId, url: objectUrl, error: null });
-      })
-      .catch((caught) => {
-        if (!active || controller.signal.aborted) return;
-        setPreview({
-          taskId,
-          url: null,
-          error:
-            caught instanceof Error ? caught.message : copy.previewError,
+    const load = async (name: string | null) => {
+      if (!name) return { url: null, error: null };
+      try {
+        const artifact = await getApiClient().downloadArtifact(taskId, name, {
+          signal: controller.signal,
         });
+        const url = URL.createObjectURL(artifact.blob);
+        objectUrls.push(url);
+        return { url, error: null };
+      } catch (caught) {
+        if (controller.signal.aborted) return { url: null, error: null };
+        return {
+          url: null,
+          error: caught instanceof Error ? caught.message : copy.previewError,
+        };
+      }
+    };
+    void Promise.all([
+      load(referenceArtifactName),
+      load(resultArtifactName),
+    ]).then(([reference, result]) => {
+      if (!active) return;
+      setArtifactImages({
+        taskId,
+        referenceUrl: reference.url,
+        resultUrl: result.url,
+        referenceError: reference.error,
+        resultError: result.error,
       });
+    });
     return () => {
       active = false;
       controller.abort();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrls.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [copy.previewError, previewName, taskId]);
+  }, [copy.previewError, referenceArtifactName, resultArtifactName, taskId]);
 
   useEffect(() => {
-    if (task?.status !== "completed" || task.expires_at === null) {
-      return;
-    }
+    if (task?.status !== "completed" || task.expires_at === null) return;
     const expiryTime = new Date(task.expires_at).getTime();
     const remaining = expiryTime - Date.now();
     if (remaining <= 0) {
@@ -190,9 +204,7 @@ export default function ProcessingPage() {
     new Date(task.expires_at).getTime() <= currentTime;
 
   useEffect(() => {
-    if (!resultExpired || !taskId) {
-      return;
-    }
+    if (!resultExpired || !taskId) return;
     void historyRepository.markExpired(taskId).catch((caught) => {
       setLocalPersistenceError(
         caught instanceof Error
@@ -202,15 +214,12 @@ export default function ProcessingPage() {
     });
   }, [resultExpired, taskId]);
 
-  const handleUploaded = useCallback(
-    (nextUpload: UploadResponse, file: File) => {
-      setUpload(nextUpload);
-      setFileName(file.name);
-      setSourceTaskId(null);
-      setActionError(null);
-    },
-    [],
-  );
+  const handleUploaded = useCallback((nextUpload: UploadResponse, file: File) => {
+    setUpload(nextUpload);
+    setFileName(file.name);
+    setSourceTaskId(null);
+    setActionError(null);
+  }, []);
 
   async function createTask() {
     if (!upload && !sourceTaskId) return;
@@ -225,9 +234,7 @@ export default function ProcessingPage() {
           : { upload_id: upload!.upload_id, style },
       );
     } catch (caught) {
-      setActionError(
-        caught instanceof Error ? caught.message : copy.createError,
-      );
+      setActionError(caught instanceof Error ? caught.message : copy.createError);
       setCreating(false);
       return;
     }
@@ -243,7 +250,7 @@ export default function ProcessingPage() {
         lastStatus: created.status,
         createdAt: created.created_at,
         expiresAt: created.expires_at,
-        summary: { demo: true },
+        summary: { demo: false },
         resultAvailable: false,
       });
     } catch (caught) {
@@ -277,17 +284,17 @@ export default function ProcessingPage() {
   const statistics = objectValue(inspection?.statistics);
   const header = objectValue(inspection?.header);
   const shape = Array.isArray(selectedHdu?.shape)
-    ? selectedHdu.shape.filter(
-        (item): item is number => typeof item === "number",
-      )
+    ? selectedHdu.shape.filter((item): item is number => typeof item === "number")
     : [];
-  const activePreview =
-    previewName && preview?.taskId === taskId ? preview : null;
+  const activeImages = artifactImages?.taskId === taskId ? artifactImages : null;
   const sourceShape = shape.length > 0 ? shape.join(" × ") : "";
   const sourceRange = statistics
     ? `${String(statistics.minimum)}–${String(statistics.maximum)}`
     : "";
   const selectedStyle = copy.styles[style];
+  const targetSummary = stringValue(summary?.target_summary);
+  const artDirectionSummary = stringValue(summary?.art_direction_summary);
+  const disclaimer = stringValue(summary?.disclaimer) ?? copy.disclaimer;
 
   return (
     <main className="workflow-main">
@@ -297,8 +304,6 @@ export default function ProcessingPage() {
           <h1>{copy.title}</h1>
           <p>{copy.description}</p>
         </header>
-
-        <MockNotice />
 
         {!taskId ? (
           <>
@@ -376,13 +381,10 @@ export default function ProcessingPage() {
         ) : null}
 
         {taskId ? (
-          <section
-            aria-label={copy.planAriaLabel}
-            className="agent-plan"
-          >
+          <section aria-label={copy.planAriaLabel} className="agent-plan">
             <div className="panel-heading">
               <div>
-                <span className="mock-label">{copy.planLabel}</span>
+                <span className="section-kicker">{copy.planLabel}</span>
                 <h2>{copy.planTitle}</h2>
               </div>
               <span>
@@ -395,31 +397,34 @@ export default function ProcessingPage() {
               {agentSteps.map((step) => (
                 <li key={`${step.id}-${step.toolName}`}>
                   <span>{step.id.padStart(2, "0")}</span>
-                  {step.toolName}
+                  {copy.toolNames[step.toolName] ?? step.toolName}
                 </li>
               ))}
             </ol>
           </section>
         ) : null}
 
-        {taskId ? <TaskEventLog demo events={events} /> : null}
+        {taskId ? <TaskEventLog events={events} /> : null}
 
         {task?.status === "completed" && !resultExpired ? (
           <>
             <section className="comparison-panel" aria-label={copy.comparisonAriaLabel}>
               <div className="comparison-frame comparison-frame--before">
                 <span>{copy.before}</span>
-                <div
-                  aria-label={copy.sourcePreviewAriaLabel}
-                  className="fits-source-visual"
-                  role="img"
-                >
-                  <span className="fits-source-visual__core" />
-                </div>
+                {activeImages?.referenceUrl ? (
+                  <div
+                    aria-label={copy.sourcePreviewAriaLabel}
+                    className="demo-preview-image"
+                    role="img"
+                    style={{ backgroundImage: `url("${activeImages.referenceUrl}")` }}
+                  />
+                ) : (
+                  <div className="demo-preview-placeholder" aria-live="polite">
+                    {activeImages?.referenceError ?? copy.previewLoading}
+                  </div>
+                )}
                 <strong>
-                  {typeof header?.OBJECT === "string"
-                    ? header.OBJECT
-                    : copy.rawFits}
+                  {typeof header?.OBJECT === "string" ? header.OBJECT : copy.rawFits}
                 </strong>
                 <small>
                   {copy.sourceMetadata(
@@ -430,25 +435,34 @@ export default function ProcessingPage() {
                 </small>
               </div>
               <div className="comparison-frame comparison-frame--after">
-                <span className="mock-label">{copy.previewLabel}</span>
-                {activePreview?.url ? (
+                <span className="section-kicker">{copy.previewLabel}</span>
+                {activeImages?.resultUrl ? (
                   <div
                     aria-label={copy.previewAriaLabel}
                     className="demo-preview-image"
                     role="img"
-                    style={{ backgroundImage: `url("${activePreview.url}")` }}
+                    style={{ backgroundImage: `url("${activeImages.resultUrl}")` }}
                   />
                 ) : (
                   <div className="demo-preview-placeholder" aria-live="polite">
-                    {activePreview?.error ?? copy.previewLoading}
+                    {activeImages?.resultError ?? copy.previewLoading}
                   </div>
                 )}
                 <strong>{selectedStyle.label}</strong>
-                <small>{copy.demoDisclaimer}</small>
+                <small>{targetSummary ?? disclaimer}</small>
               </div>
             </section>
+            {artDirectionSummary ? (
+              <section className="source-task-card">
+                <span className="section-kicker">{copy.directionKicker}</span>
+                <h2>{copy.directionTitle}</h2>
+                <p>{artDirectionSummary}</p>
+                <small>{disclaimer}</small>
+              </section>
+            ) : null}
             <ArtifactDownloads
               artifacts={task.result.artifacts}
+              label={copy.downloadLabel}
               taskId={task.id}
             />
           </>

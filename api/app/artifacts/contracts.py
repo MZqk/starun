@@ -5,9 +5,11 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 MAX_ARTIFACT_BYTES = 10 * 1024 * 1024
-type MediaType = Literal["application/json", "image/png", "image/tiff"]
+type MediaType = Literal["application/json", "image/jpeg", "image/png", "image/tiff"]
 MEDIA_TYPES: dict[str, MediaType] = {
     ".json": "application/json",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
     ".png": "image/png",
     ".tif": "image/tiff",
     ".tiff": "image/tiff",
@@ -50,7 +52,7 @@ class ArtifactManifestEntry(BaseModel):
     media_type: MediaType
     size: int = Field(ge=0, le=MAX_ARTIFACT_BYTES, strict=True)
     sha256: Sha256
-    demo: Literal[True] = True
+    demo: bool = False
 
     @model_validator(mode="after")
     def validate_name_and_media_type(self) -> "ArtifactManifestEntry":

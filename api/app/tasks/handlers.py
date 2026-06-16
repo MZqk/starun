@@ -7,7 +7,6 @@ from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.agent import build_mock_runner
 from app.agent.contracts import TaskContext
 from app.agent.contracts import AgentEvent
 from app.agent.runner import AgentCancelledError, AgentGuardrailError, EventSink
@@ -26,6 +25,12 @@ from app.filesystem import (
     open_directory_fd,
     open_relative_directory_fd,
     relative_path_components,
+)
+from app.processing import build_processing_runner
+from app.processing.art_direction import KimiArtDirectionError
+from app.processing.image_provider import (
+    ImageProviderConfigurationError,
+    ImageProviderError,
 )
 from app.tasks.events import TaskEventService
 from app.tasks.executor import HandlerResult, TaskCancelled, TaskHandlerError
@@ -206,9 +211,9 @@ class ProcessingTaskHandler:
         self._settings = settings
         self._events = TaskEventService(session_factory, clock=clock)
         self._runner_factory = runner_factory or (
-            lambda store, event_sink: build_mock_runner(
+            lambda store, event_sink: build_processing_runner(
                 store,
-                step_delay_seconds=settings.mock_agent_step_delay_seconds,
+                settings=settings,
                 event_sink=event_sink,
             )
         )
@@ -250,7 +255,6 @@ class ProcessingTaskHandler:
                     basic_metadata={
                         "selected_hdu": task.selected_hdu,
                         "input_size": input_size,
-                        "demo": True,
                     },
                     cancellation_check=lambda: self._cancel_requested(task_id),
                 )
@@ -271,6 +275,12 @@ class ProcessingTaskHandler:
             raise TaskCancelled() from exc
         except AgentGuardrailError as exc:
             raise TaskHandlerError("agent_guardrail", "Agent output was rejected.", False) from exc
+        except KimiArtDirectionError as exc:
+            raise TaskHandlerError("art_direction_failed", str(exc), exc.retryable) from exc
+        except ImageProviderConfigurationError as exc:
+            raise TaskHandlerError("image_provider_not_configured", str(exc), False) from exc
+        except ImageProviderError as exc:
+            raise TaskHandlerError(exc.code, str(exc), exc.retryable) from exc
         finally:
             os.close(data_root_fd)
 
@@ -284,7 +294,7 @@ class ProcessingTaskHandler:
                 "inspection": (
                     inspection.model_dump(mode="json") if inspection is not None else None
                 ),
-                "demo": True,
+                "demo": False,
             }
         )
 

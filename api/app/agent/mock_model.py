@@ -40,6 +40,17 @@ class DeterministicMockModel:
             raise ValueError("mock evaluation metric missing")
         return score
 
+    async def summarize(
+        self,
+        context: TaskContext,
+        observation: ToolResult,
+    ) -> dict[str, JsonValue]:
+        del context, observation
+        return {
+            "demo": True,
+            "notice": "Deterministic mock output; no scientific processing performed.",
+        }
+
 
 def _seed(task_id: str, style: ProcessingStyle) -> int:
     digest = hashlib.sha256(f"{task_id}{style.value}".encode()).digest()

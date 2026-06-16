@@ -141,13 +141,17 @@ class AgentRunner:
             "evaluation",
             {"quality_score": quality_score},
         )
+        summary = await self._model.summarize(context, combined)
+        if not isinstance(summary, dict):
+            raise AgentOutputError("model summary returned an invalid value")
+        demo = summary.get("demo")
         await self._event(
             context,
             events,
             "completion",
             {
                 "artifact_names": [artifact.name for artifact in combined.artifacts],
-                "demo": True,
+                "demo": demo if isinstance(demo, bool) else False,
             },
         )
         return AgentRunResult(
@@ -155,10 +159,7 @@ class AgentRunner:
             quality_score=quality_score,
             artifacts=combined.artifacts,
             events=events,
-            summary={
-                "demo": True,
-                "notice": "Deterministic mock output; no scientific processing performed.",
-            },
+            summary=summary,
         )
 
     def _validate_plan(self, raw_plan: Any) -> AgentPlan:
@@ -206,7 +207,7 @@ class AgentRunner:
             if claimed.name in artifact_names:
                 raise AgentOutputError("agent produced duplicate artifact names")
             try:
-                actual = self._artifact_store.describe(claimed.name)
+                actual = self._artifact_store.describe(claimed.name, demo=claimed.demo)
             except (FileNotFoundError, OSError, ValueError) as exc:
                 raise AgentOutputError("tool claimed an invalid or missing artifact") from exc
             if actual != claimed:

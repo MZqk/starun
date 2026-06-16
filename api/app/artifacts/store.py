@@ -58,7 +58,13 @@ class ArtifactStore:
     def root_fd(self) -> int:
         return self._require_root_fd()
 
-    def write_bytes(self, name: str, data: bytes) -> ArtifactManifestEntry:
+    def write_bytes(
+        self,
+        name: str,
+        data: bytes,
+        *,
+        demo: bool = False,
+    ) -> ArtifactManifestEntry:
         media_type = self._validate_supported_name(name)
         if len(data) > MAX_ARTIFACT_BYTES:
             raise ArtifactSizeError("artifact exceeds maximum byte size")
@@ -97,12 +103,14 @@ class ArtifactStore:
             except FileNotFoundError:
                 pass
             raise
-        return self.describe(name, expected_media_type=media_type)
+        return self.describe(name, expected_media_type=media_type, demo=demo)
 
     def write_json(
         self,
         name: str,
         value: dict[str, JsonValue],
+        *,
+        demo: bool = False,
     ) -> ArtifactManifestEntry:
         data = (
             json.dumps(
@@ -113,7 +121,7 @@ class ArtifactStore:
             )
             + "\n"
         ).encode("utf-8")
-        return self.write_bytes(name, data)
+        return self.write_bytes(name, data, demo=demo)
 
     def read_bytes(self, name: str) -> bytes:
         self._validate_supported_name(name)
@@ -152,6 +160,7 @@ class ArtifactStore:
         name: str,
         *,
         expected_media_type: MediaType | None = None,
+        demo: bool = False,
     ) -> ArtifactManifestEntry:
         media_type = self._validate_supported_name(name)
         if expected_media_type is not None and media_type != expected_media_type:
@@ -162,6 +171,7 @@ class ArtifactStore:
             media_type=media_type,
             size=len(data),
             sha256=hashlib.sha256(data).hexdigest(),
+            demo=demo,
         )
 
     def exists(self, name: str) -> bool:

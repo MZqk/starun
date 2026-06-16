@@ -20,7 +20,12 @@ class FitsPreview:
     upper_percentile: float
 
 
-def render_fits_preview(path: Path, hdu_index: int) -> FitsPreview:
+def render_fits_preview(
+    path: Path,
+    hdu_index: int,
+    *,
+    max_edge: int = MAX_PREVIEW_EDGE,
+) -> FitsPreview:
     with fits.open(
         path,
         memmap=True,
@@ -30,7 +35,7 @@ def render_fits_preview(path: Path, hdu_index: int) -> FitsPreview:
         hdu = hdus[hdu_index]
         if hdu.data is None:
             raise ValueError("selected FITS HDU has no image data")
-        image = _sample_image(hdu.data)
+        image = _sample_image(hdu.data, max_edge=max_edge)
         image = _physical_values(image, hdu.header)
 
     stretched, lower, upper = _stretch(image)
@@ -44,10 +49,16 @@ def render_fits_preview(path: Path, hdu_index: int) -> FitsPreview:
     )
 
 
-def _sample_image(data: Any) -> np.ndarray[Any, np.dtype[np.float32]]:
+def _sample_image(
+    data: Any,
+    *,
+    max_edge: int,
+) -> np.ndarray[Any, np.dtype[np.float32]]:
+    if max_edge <= 0:
+        raise ValueError("max_edge must be positive")
     shape = tuple(int(length) for length in data.shape)
     if len(shape) == 2:
-        step = max(1, int(np.ceil(max(shape) / MAX_PREVIEW_EDGE)))
+        step = max(1, int(np.ceil(max(shape) / max_edge)))
         return np.array(data[::step, ::step], dtype=np.float32, copy=True)
     if len(shape) != 3:
         raise ValueError("selected FITS HDU is not a supported image")
@@ -56,7 +67,7 @@ def _sample_image(data: Any) -> np.ndarray[Any, np.dtype[np.float32]]:
     if channel_axis is None:
         raise ValueError("selected FITS cube has no RGB channel axis")
     spatial_shape = tuple(length for axis, length in enumerate(shape) if axis != channel_axis)
-    step = max(1, int(np.ceil(max(spatial_shape) / MAX_PREVIEW_EDGE)))
+    step = max(1, int(np.ceil(max(spatial_shape) / max_edge)))
     if channel_axis == 0:
         sampled = data[:, ::step, ::step]
         sampled = np.moveaxis(sampled, 0, -1)

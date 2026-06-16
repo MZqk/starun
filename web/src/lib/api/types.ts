@@ -13,6 +13,7 @@ export type ProcessingStyle = "realistic" | "balanced" | "artistic";
 export type EventLevel = "debug" | "info" | "warning" | "error";
 export type ArtifactMediaType =
   | "application/json"
+  | "image/jpeg"
   | "image/png"
   | "image/tiff";
 
@@ -97,7 +98,7 @@ export interface ArtifactManifestEntry {
   media_type: ArtifactMediaType;
   size: number;
   sha256: string;
-  demo: true;
+  demo: boolean;
 }
 
 export interface TaskResultResponse {
