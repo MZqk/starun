@@ -337,6 +337,9 @@ export function resolveApiBaseUrl(): string {
   if (typeof window !== "undefined" && !process.env.VITEST) {
     return window.location.origin;
   }
+  if (typeof window !== "undefined" && !process.env.VITEST) {
+    return window.location.origin;
+  }
   throw new Error(
     "NEXT_PUBLIC_API_BASE_URL is required outside browser development.",
   );
