@@ -74,7 +74,10 @@ class TokenHubImageProvider:
         if response.status_code >= 400:
             raise ImageProviderError(
                 "image_provider_error",
-                f"Image generation request failed with status {response.status_code}.",
+                (
+                    f"Image generation request failed with status {response.status_code}"
+                    f"{_response_hint(response)}."
+                ),
                 retryable=response.status_code == 429 or response.status_code >= 500,
             )
         return await self._parse_generation_response(response)
@@ -115,18 +118,18 @@ class TokenHubImageProvider:
     async def _download(self, url: str) -> tuple[bytes, str]:
         parsed = urlparse(url)
         host = (parsed.hostname or "").lower()
-        if parsed.scheme != "https" or host not in self._allowed_download_hosts:
+        if parsed.scheme != "https" or not self._is_allowed_download_host(host):
             raise ImageProviderError(
                 "image_provider_untrusted_download",
-                "Image provider returned an untrusted download URL.",
+                f"Image provider returned an untrusted download URL host: {host or 'unknown'}.",
                 retryable=False,
             )
         response = await self._download_with_retry(url)
         final_host = (response.url.host or "").lower()
-        if final_host not in self._allowed_download_hosts:
+        if not self._is_allowed_download_host(final_host):
             raise ImageProviderError(
                 "image_provider_untrusted_download",
-                "Image provider redirected to an untrusted download host.",
+                f"Image provider redirected to an untrusted download host: {final_host or 'unknown'}.",
                 retryable=False,
             )
         data = response.content
@@ -137,6 +140,20 @@ class TokenHubImageProvider:
                 retryable=False,
             )
         return data, final_host
+
+    def _is_allowed_download_host(self, host: str) -> bool:
+        if host in self._allowed_download_hosts:
+            return True
+        # TokenHub commonly returns Tencent COS temporary URLs whose bucket host
+        # and region can vary per request; keep the trust boundary limited to
+        # HTTPS COS hosts rather than all myqcloud.com domains.
+        parts = host.split(".")
+        return (
+            len(parts) >= 5
+            and parts[-1] == "com"
+            and parts[-2] == "myqcloud"
+            and "cos" in parts[:-2]
+        )
 
     async def _download_with_retry(self, url: str) -> httpx.Response:
         last_network_error: httpx.TimeoutException | httpx.NetworkError | None = None
@@ -168,7 +185,8 @@ class TokenHubImageProvider:
                 (
                     "Generated image download failed with status "
                     f"{last_response.status_code} from host "
-                    f"{(last_response.url.host or 'unknown').lower()}."
+                    f"{(last_response.url.host or 'unknown').lower()}"
+                    f"{_response_hint(last_response)}."
                 ),
                 retryable=(
                     last_response.status_code in {404, 408, 409, 425, 429}
@@ -199,7 +217,7 @@ def _decode_image(
     except OSError as exc:
         raise ImageProviderError(
             "image_provider_invalid_image",
-            "Generated image could not be decoded.",
+            f"Generated image could not be decoded{_content_hint(data)}.",
             retryable=True,
         ) from exc
     if image_format == "PNG":
@@ -231,3 +249,28 @@ def _final_prompt(direction: ArtDirection) -> str:
         f"\n\n增强目标：{direction.generation_prompt}"
         f"\n\n避免：{direction.negative_prompt}"
     )
+
+
+def _response_hint(response: httpx.Response) -> str:
+    content_type = response.headers.get("content-type", "").split(";", 1)[0].strip()
+    length = response.headers.get("content-length")
+    hint = f"; content_type={content_type or 'unknown'}"
+    if length:
+        hint += f"; content_length={length}"
+    text = _safe_text(response.content)
+    if text:
+        hint += f"; body={text}"
+    return hint
+
+
+def _content_hint(data: bytes) -> str:
+    text = _safe_text(data)
+    return f"; body={text}" if text else ""
+
+
+def _safe_text(data: bytes) -> str:
+    if not data:
+        return ""
+    sample = data[:200].decode("utf-8", errors="ignore")
+    sample = " ".join(sample.split())
+    return sample[:160]
