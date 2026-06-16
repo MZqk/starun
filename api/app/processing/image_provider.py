@@ -1,5 +1,6 @@
 import base64
 import binascii
+import asyncio
 from io import BytesIO
 from urllib.parse import urlparse
 
@@ -120,20 +121,13 @@ class TokenHubImageProvider:
                 "Image provider returned an untrusted download URL.",
                 retryable=False,
             )
-        try:
-            async with httpx.AsyncClient(timeout=self._timeout, follow_redirects=False) as client:
-                response = await client.get(url)
-        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+        response = await self._download_with_retry(url)
+        final_host = (response.url.host or "").lower()
+        if final_host not in self._allowed_download_hosts:
             raise ImageProviderError(
-                "image_provider_download_failed",
-                "Generated image download failed.",
-                retryable=True,
-            ) from exc
-        if response.status_code >= 400:
-            raise ImageProviderError(
-                "image_provider_download_failed",
-                f"Generated image download failed with status {response.status_code}.",
-                retryable=response.status_code >= 500,
+                "image_provider_untrusted_download",
+                "Image provider redirected to an untrusted download host.",
+                retryable=False,
             )
         data = response.content
         if len(data) > self._max_response_bytes:
@@ -142,7 +136,51 @@ class TokenHubImageProvider:
                 "Generated image exceeds size limit.",
                 retryable=False,
             )
-        return data, host
+        return data, final_host
+
+    async def _download_with_retry(self, url: str) -> httpx.Response:
+        last_network_error: httpx.TimeoutException | httpx.NetworkError | None = None
+        last_response: httpx.Response | None = None
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(
+                    timeout=self._timeout,
+                    follow_redirects=True,
+                    max_redirects=3,
+                ) as client:
+                    response = await client.get(url)
+            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                last_network_error = exc
+                if attempt < 2:
+                    await asyncio.sleep(1.0 + attempt)
+                continue
+            last_response = response
+            if response.status_code < 400:
+                return response
+            if response.status_code not in {404, 408, 409, 425, 429} and response.status_code < 500:
+                break
+            if attempt < 2:
+                await asyncio.sleep(1.0 + attempt)
+
+        if last_response is not None:
+            raise ImageProviderError(
+                "image_provider_download_failed",
+                (
+                    "Generated image download failed with status "
+                    f"{last_response.status_code} from host "
+                    f"{(last_response.url.host or 'unknown').lower()}."
+                ),
+                retryable=(
+                    last_response.status_code in {404, 408, 409, 425, 429}
+                    or last_response.status_code >= 500
+                ),
+            )
+        assert last_network_error is not None
+        raise ImageProviderError(
+            "image_provider_download_failed",
+            f"Generated image download failed: {type(last_network_error).__name__}.",
+            retryable=True,
+        ) from last_network_error
 
 
 def _decode_image(
