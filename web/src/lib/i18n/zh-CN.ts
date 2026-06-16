@@ -217,7 +217,7 @@ export const zhCN = {
       kicker: "AI 自动出图",
       title: "选择一种风格，生成 AI 艺术增强成片",
       description:
-        "系统由 AI 自动出图 Agent 调用 deep-sky-processor，在隔离工作区中生成参考图和艺术增强结果。",
+        "系统会从 FITS 生成参考预览，由 Kimi 给出艺术指导，再调用图片生成模型输出参考图约束下的成片。",
       unnamedFile: "未命名 FITS",
       analysisSourceFile: "分析任务源文件",
       previewError: "预览加载失败。",
@@ -254,7 +254,9 @@ export const zhCN = {
       directionTitle: "AI 艺术指导",
       downloadLabel: "AI 自动出图产物",
       toolNames: {
-        "deep-sky-processor": "深空自动出图 Skill",
+        "processing.prepare_reference": "生成 FITS 参考预览",
+        "processing.plan_art_direction": "Kimi 生成艺术指导",
+        "processing.generate_artwork": "图片模型生成成片",
       } as Record<string, string>,
       expiredTitle: "处理结果已过期",
       resultUnavailable: "预览与下载结果已不可用。",

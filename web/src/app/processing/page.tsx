@@ -24,7 +24,11 @@ import { zhCN } from "../../lib/i18n/zh-CN";
 
 const historyRepository = new TaskHistoryRepository();
 const STYLE_VALUES: ProcessingStyle[] = ["realistic", "balanced", "artistic"];
-const FALLBACK_AGENT_STEPS = ["deep-sky-processor"] as const;
+const FALLBACK_AGENT_STEPS = [
+  "processing.prepare_reference",
+  "processing.plan_art_direction",
+  "processing.generate_artwork",
+] as const;
 
 function stringPayload(event: TaskEventResponse, key: string): string | null {
   const value = event.payload[key];
