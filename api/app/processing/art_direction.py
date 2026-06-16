@@ -111,7 +111,12 @@ class KimiArtDirectionClient:
             if not isinstance(content, str):
                 raise TypeError("completion content is not text")
             return ArtDirection.model_validate_json(content)
-        except (KeyError, IndexError, TypeError, ValueError, ValidationError) as exc:
+        except ValidationError as exc:
+            raise KimiArtDirectionError(
+                f"Kimi returned an invalid art direction: {_validation_summary(exc)}",
+                retryable=True,
+            ) from exc
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise KimiArtDirectionError(
                 "Kimi returned an invalid art direction.",
                 retryable=True,
@@ -142,3 +147,12 @@ def _direction_context(
         "disclaimer": ARTWORK_DISCLAIMER,
     }
     return json.dumps(context, ensure_ascii=False, separators=(",", ":"))
+
+
+def _validation_summary(error: ValidationError) -> str:
+    parts: list[str] = []
+    for item in error.errors()[:3]:
+        location = ".".join(str(part) for part in item.get("loc", ())) or "response"
+        message = str(item.get("msg", "invalid value"))
+        parts.append(f"{location}: {message}")
+    return "; ".join(parts) or "schema validation failed"

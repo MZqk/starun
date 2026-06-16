@@ -29,10 +29,14 @@ from app.usage.service import get_daily_usage
 router = APIRouter(tags=["tasks"])
 PUBLIC_ERROR_MESSAGES = {
     "agent_guardrail": "Agent output was rejected.",
-    "agent_not_configured": "Agent provider credentials are not configured.",
-    "agent_provider_error": "Agent provider request failed.",
-    "skill_execution_failed": "The selected skill failed to execute.",
-    "skill_output_invalid": "The selected skill returned invalid output.",
+    "ai_not_configured": "AI provider credentials are not configured.",
+    "ai_provider_error": "AI provider request failed.",
+    "art_direction_failed": "AI art direction generation failed.",
+    "image_provider_error": "Image generation provider request failed.",
+    "image_provider_invalid_response": "Image generation provider returned an invalid response.",
+    "image_provider_missing_image": "Image generation provider did not return an image.",
+    "image_provider_not_configured": "Image generation provider credentials are not configured.",
+    "image_provider_unreachable": "Image generation provider is temporarily unreachable.",
     "restart_interrupted": "Task execution was interrupted by an application restart.",
     "resource_error": "The task could not acquire the required resources.",
     "resource_exhausted": "The task could not acquire the required resources.",
@@ -71,8 +75,12 @@ EVENT_KEY_ALLOWLISTS = {
     "task_timeout": {"error_code"},
 }
 DETAILED_TASK_ERROR_CODES = {
-    "agent_provider_error",
-    "skill_execution_failed",
+    "ai_provider_error",
+    "art_direction_failed",
+    "image_provider_error",
+    "image_provider_invalid_response",
+    "image_provider_missing_image",
+    "image_provider_unreachable",
 }
 WINDOWS_DRIVE_PATH = re.compile(r"^[A-Za-z]:[\\/]")
 TRAVERSAL_PATH = re.compile(r"(^|[\\/])\.\.([\\/]|$)")
