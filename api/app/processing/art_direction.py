@@ -1,4 +1,5 @@
 import base64
+import asyncio
 import json
 from typing import Any
 
@@ -82,21 +83,7 @@ class KimiArtDirectionClient:
             "thinking": {"type": "disabled"},
             "max_completion_tokens": 3000,
         }
-        try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.post(
-                    self._url,
-                    headers={
-                        "Authorization": f"Bearer {self._api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
-                )
-        except (httpx.TimeoutException, httpx.NetworkError) as exc:
-            raise KimiArtDirectionError(
-                "Kimi art direction service is temporarily unreachable.",
-                retryable=True,
-            ) from exc
+        response = await self._post_with_retry(payload)
         if response.status_code >= 400:
             raise KimiArtDirectionError(
                 (
@@ -121,6 +108,29 @@ class KimiArtDirectionClient:
                 "Kimi returned an invalid art direction.",
                 retryable=True,
             ) from exc
+
+    async def _post_with_retry(self, payload: dict[str, Any]) -> httpx.Response:
+        last_error: httpx.TimeoutException | httpx.NetworkError | None = None
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=self._timeout) as client:
+                    return await client.post(
+                        self._url,
+                        headers={
+                            "Authorization": f"Bearer {self._api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                    )
+            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                last_error = exc
+                if attempt == 0:
+                    await asyncio.sleep(0.5)
+        assert last_error is not None
+        raise KimiArtDirectionError(
+            _network_error_message(last_error),
+            retryable=True,
+        ) from last_error
 
 
 def _direction_context(
@@ -158,3 +168,18 @@ def _validation_summary(error: ValidationError) -> str:
         input_suffix = f" (input={raw_input!r})" if raw_input is not None else ""
         parts.append(f"{location}: {message}{input_suffix}")
     return "; ".join(parts) or "schema validation failed"
+
+
+def _network_error_message(error: httpx.TimeoutException | httpx.NetworkError) -> str:
+    if isinstance(error, httpx.ConnectTimeout):
+        return "Kimi art direction request timed out while connecting to the provider."
+    if isinstance(error, httpx.ReadTimeout):
+        return "Kimi art direction request timed out while waiting for the provider response."
+    if isinstance(error, httpx.WriteTimeout):
+        return (
+            "Kimi art direction request timed out while uploading the reference image; "
+            "the preview may be too large for the provider connection."
+        )
+    if isinstance(error, httpx.PoolTimeout):
+        return "Kimi art direction request timed out waiting for an HTTP connection slot."
+    return f"Kimi art direction network error: {type(error).__name__}."

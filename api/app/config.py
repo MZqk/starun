@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     image_ai_model: str = "hy-image-v3.0"
     image_ai_timeout_seconds: float = Field(default=300, gt=0, le=900)
     image_ai_max_response_bytes: int = Field(default=10 * 1024 * 1024, gt=0)
-    image_ai_max_edge: int = Field(default=2048, ge=512, le=4096)
+    image_ai_max_edge: int = Field(default=1024, ge=512, le=4096)
     image_ai_allowed_download_hosts: str = (
         "tokenhub.tencentmaas.com,aiart-1258344699.cos.ap-guangzhou.myqcloud.com"
     )
