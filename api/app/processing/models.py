@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 ARTWORK_DISCLAIMER = (
@@ -14,15 +16,44 @@ class ArtDirection(BaseModel):
     quality_notes: list[str] = Field(min_length=1, max_length=8)
     generation_prompt: str = Field(min_length=20, max_length=1600)
     negative_prompt: str = Field(min_length=1, max_length=600)
-    edit_intensity: str = Field(pattern="^(low|medium|high)$")
+    edit_intensity: Literal["low", "medium", "high"]
     risk_notes: list[str] = Field(default_factory=list, max_length=6)
 
     @field_validator("edit_intensity", mode="before")
     @classmethod
     def normalize_edit_intensity(cls, value: object) -> object:
-        if value == "balanced":
-            return "medium"
-        return value
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().lower()
+        aliases = {
+            "low": "low",
+            "light": "low",
+            "mild": "low",
+            "subtle": "low",
+            "restrained": "low",
+            "realistic": "low",
+            "写实": "low",
+            "低": "low",
+            "轻微": "low",
+            "克制": "low",
+            "medium": "medium",
+            "moderate": "medium",
+            "balanced": "medium",
+            "normal": "medium",
+            "适中": "medium",
+            "中等": "medium",
+            "平衡": "medium",
+            "high": "high",
+            "strong": "high",
+            "intense": "high",
+            "artistic": "high",
+            "高": "high",
+            "强": "high",
+            "艺术": "high",
+        }
+        if normalized in aliases:
+            return aliases[normalized]
+        return "medium"
 
 
 class GeneratedArtwork(BaseModel):

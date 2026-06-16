@@ -154,5 +154,7 @@ def _validation_summary(error: ValidationError) -> str:
     for item in error.errors()[:3]:
         location = ".".join(str(part) for part in item.get("loc", ())) or "response"
         message = str(item.get("msg", "invalid value"))
-        parts.append(f"{location}: {message}")
+        raw_input = item.get("input")
+        input_suffix = f" (input={raw_input!r})" if raw_input is not None else ""
+        parts.append(f"{location}: {message}{input_suffix}")
     return "; ".join(parts) or "schema validation failed"
