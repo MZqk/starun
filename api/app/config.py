@@ -27,15 +27,26 @@ class Settings(BaseSettings):
     analysis_timeout_seconds: int = 600
     processing_timeout_seconds: int = 3600
     min_free_disk_bytes: int = 5 * 1024 * 1024 * 1024
-    agent_base_url: str = "https://api.openai.com/v1"
-    agent_api_key: SecretStr | None = None
-    agent_model: str = "gpt-5.1"
-    agent_protocol: AgentProtocol = AgentProtocol.RESPONSES
-    agent_timeout_seconds: float = Field(default=180, gt=0, le=900)
-    agent_max_turns: int = Field(default=8, ge=1, le=32)
-    analysis_skill_path: Path = Path("../deep-sky-advisor")
-    processing_skill_path: Path = Path("../deep-sky-processor")
+    ai_base_url: str = "https://api.moonshot.cn/v1"
+    ai_api_key: SecretStr | None = None
+    ai_model: str = "kimi-k2.6"
+    ai_timeout_seconds: float = Field(default=180, gt=0, le=600)
+    image_ai_base_url: str = "https://tokenhub.tencentmaas.com/v1"
+    image_ai_api_key: SecretStr | None = None
+    image_ai_model: str = "hy-image-v3.0"
+    image_ai_timeout_seconds: float = Field(default=300, gt=0, le=900)
+    image_ai_max_response_bytes: int = Field(default=12 * 1024 * 1024, gt=0)
+    image_ai_max_edge: int = Field(default=2048, ge=512, le=4096)
+    image_ai_allowed_download_hosts: str = "tokenhub.tencentmaas.com"
     web_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
+    @property
+    def allowed_image_download_hosts(self) -> frozenset[str]:
+        return frozenset(
+            host.strip().lower()
+            for host in self.image_ai_allowed_download_hosts.split(",")
+            if host.strip()
+        )
 
     @property
     def allowed_web_origins(self) -> list[str]:
