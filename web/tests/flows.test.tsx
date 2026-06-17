@@ -142,6 +142,8 @@ describe("Task 11 flows", () => {
     );
     SuccessfulUploadXhr.instances = [];
     vi.clearAllMocks();
+    api.getTask.mockReset();
+    api.getTaskEvents.mockReset();
     window.history.replaceState({}, "", "/");
 
     api.buildUploadRequest.mockResolvedValue({
@@ -158,6 +160,7 @@ describe("Task 11 flows", () => {
 
   afterEach(() => {
     cleanup();
+    vi.clearAllTimers();
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -710,7 +713,11 @@ describe("Task 11 flows", () => {
         expires_at: "2036-06-15T11:00:00Z",
         result: {
           manifest_available: true,
-          summary: { demo: true },
+          summary: {
+            demo: true,
+            reference_artifact: "preview-demo.png",
+            result_artifact: "result-demo.tiff",
+          },
           artifacts: ["preview-demo.png", "result-demo.tiff"],
         },
         inspection: {
@@ -777,12 +784,12 @@ describe("Task 11 flows", () => {
     const view = render(<ProcessingPage />);
 
     const preview = await screen.findByRole("img", {
-      name: "Mock 演示处理后预览",
+      name: "AI 生成处理后预览",
     });
     expect(preview).toHaveStyle({
       backgroundImage: 'url("blob:preview-1")',
     });
-    const plan = screen.getByRole("region", { name: "Mock Agent 处理计划" });
+    const plan = screen.getByRole("region", { name: "AI Agent 处理计划" });
     expect(
       within(plan).getAllByRole("listitem").map((item) => item.textContent),
     ).toEqual([
@@ -794,9 +801,9 @@ describe("Task 11 flows", () => {
       "06mock.evaluate",
       "07mock.export",
     ]);
-    expect(screen.getByText("Mock 工具事件日志")).toBeVisible();
-    expect(screen.getByText("Mock 演示预览")).toBeVisible();
-    expect(screen.getByText("Mock 演示产物下载")).toBeVisible();
+    expect(screen.getByText("实时事件")).toBeVisible();
+    expect(screen.getByText("AI 生成成片")).toBeVisible();
+    expect(screen.getByText("导出文件")).toBeVisible();
     expect(screen.getByText(/M42/)).toBeVisible();
     expect(api.downloadArtifact).toHaveBeenCalledWith(
       "processing-1",
@@ -831,7 +838,11 @@ describe("Task 11 flows", () => {
         expires_at: "2026-06-14T10:00:02Z",
         result: {
           manifest_available: true,
-          summary: { demo: true },
+          summary: {
+            demo: true,
+            reference_artifact: "preview.png",
+            result_artifact: "result.tiff",
+          },
           artifacts: ["preview.png", "result.tiff"],
         },
       }),
@@ -876,7 +887,7 @@ describe("Task 11 flows", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("uses the exact seven-step fallback before tool events arrive", async () => {
+  it("uses the exact three-step fallback before tool events arrive", async () => {
     window.history.replaceState({}, "", "/processing?task=processing-fallback");
     await new TaskHistoryRepository().upsert({
       taskId: "processing-fallback",
@@ -899,10 +910,10 @@ describe("Task 11 flows", () => {
     render(<ProcessingPage />);
 
     const plan = await screen.findByRole("region", {
-      name: "Mock Agent 处理计划",
+      name: "AI Agent 处理计划",
     });
-    expect(within(plan).getAllByRole("listitem")).toHaveLength(7);
-    expect(within(plan).getByText("mock.evaluate")).toBeVisible();
+    expect(within(plan).getAllByRole("listitem")).toHaveLength(3);
+    expect(within(plan).getByText("生成 FITS 参考预览")).toBeVisible();
   });
 
   it("keeps polling cadence when history persistence rejects and stops terminal tasks", async () => {

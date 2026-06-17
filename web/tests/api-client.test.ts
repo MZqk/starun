@@ -104,11 +104,11 @@ describe("StarunApiClient", () => {
     expect(() => resolveApiBaseUrl()).toThrow(/NEXT_PUBLIC_API_BASE_URL/);
   });
 
-  it("uses localhost in browser development when configuration is missing", () => {
+  it("uses 127.0.0.1 in browser development when configuration is missing", () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "");
 
-    expect(resolveApiBaseUrl()).toBe("http://localhost:8000");
+    expect(resolveApiBaseUrl()).toBe("http://127.0.0.1:8000");
   });
 
   it("calls the default global fetch with the global receiver", async () => {

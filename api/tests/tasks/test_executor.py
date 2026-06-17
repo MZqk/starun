@@ -18,6 +18,8 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
+import numpy as np
+from astropy.io import fits
 from app.db.base import Base
 from app.db.session import get_db_session
 from app.db.models import (
@@ -89,7 +91,8 @@ def _task(
 ) -> Task:
     source = settings.data_root / "uploads" / task_id / "input.fits"
     source.parent.mkdir(parents=True, exist_ok=True)
-    source.write_bytes(b"SIMPLE DETERMINISTIC FITS")
+    data = np.zeros((32, 48), dtype=np.float32)
+    fits.PrimaryHDU(data=data).writeto(source, overwrite=True)
     with factory() as session:
         upload = Upload(
             id=f"{task_id}-upload",
@@ -697,12 +700,57 @@ async def test_executor_does_not_lease_when_another_task_is_running(
 async def test_analysis_writes_deterministic_mock_report_and_events(
     session_factory: sessionmaker[Session],
     settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from app.analysis import KimiAnalysisClient
+    from app.analysis.models import (
+        ProfessionalAnalysis,
+        ImageQuality,
+        VisualObservations,
+        AnalysisIssue,
+        ProcessingStep,
+    )
+
+    mock_analysis = ProfessionalAnalysis(
+        overview="Overview text",
+        image_quality=ImageQuality(rating="good", summary="Quality summary", confidence=0.9),
+        observations=VisualObservations(
+            target="M42",
+            background="Dark background",
+            stars="Round stars",
+            noise="Low noise",
+            color="Balanced color",
+        ),
+        issues=[
+            AnalysisIssue(
+                title="Slight bloating",
+                severity="low",
+                evidence="bloated stars",
+                recommendation="deconvolution",
+            )
+        ],
+        workflow=[
+            ProcessingStep(
+                order=1,
+                step="Denoise",
+                purpose="reduce noise",
+                guidance="apply denoise",
+            )
+        ],
+        caveats=["visual check only"],
+    )
+
+    async def mock_analyze(self, *args, **kwargs):
+        return mock_analysis
+
+    monkeypatch.setattr(KimiAnalysisClient, "analyze", mock_analyze)
+
     _task(session_factory, settings, "analysis-a", TaskType.ANALYSIS)
     _task(session_factory, settings, "analysis-b", TaskType.ANALYSIS)
     different = _task(session_factory, settings, "analysis-c", TaskType.ANALYSIS)
     assert different.input_path is not None
-    Path(different.input_path).write_bytes(b"DIFFERENT DETERMINISTIC FITS")
+    data = np.zeros((32, 48), dtype=np.float32)
+    fits.PrimaryHDU(data=data).writeto(different.input_path, overwrite=True)
     handler = AnalysisTaskHandler(session_factory, settings, clock=lambda: FIXED_NOW)
 
     first = await handler.run("analysis-a")
@@ -718,37 +766,26 @@ async def test_analysis_writes_deterministic_mock_report_and_events(
     assert first == second
     assert report == same_source_report
     assert (
-        first.result_manifest["summary"]["professional_metrics"]
-        == same_source.result_manifest["summary"]["professional_metrics"]
+        first.result_manifest["summary"]["analysis"]
+        == same_source.result_manifest["summary"]["analysis"]
     )
     assert (
-        first.result_manifest["summary"]["recommendations"]
-        == same_source.result_manifest["summary"]["recommendations"]
+        first.result_manifest["summary"]["analysis"]["overview"]
+        == "Overview text"
     )
-    assert (
-        first.result_manifest["summary"]["professional_metrics"]
-        != different_source.result_manifest["summary"]["professional_metrics"]
-    )
-    assert report["demo"] is True
-    assert report["notice"] == "Mock/demo analysis; not a scientific measurement."
+    assert first.result_manifest["demo"] is False
     assert report["inspection"]["statistics"]["median"] == 0.35
-    assert report["input_metadata"]["size_bytes"] == len(b"SIMPLE DETERMINISTIC FITS")
+    assert report["input_metadata"]["size_bytes"] == same_source_report["input_metadata"]["size_bytes"]
     assert len(report["input_metadata"]["sha256"]) == 64
-    assert set(report["professional_metrics"]) == {
-        "ellipticity",
-        "fwhm",
-        "snr",
-        "star_count",
-    }
-    assert report["recommendations"]
-    assert report["parameter_plan"]
-    assert first.result_manifest["artifacts"][0]["name"] == "analysis-report.json"
+    assert report["analysis"]["overview"] == "Overview text"
+    assert first.result_manifest["artifacts"][0]["name"] == "analysis-preview.png"
+    assert first.result_manifest["artifacts"][1]["name"] == "analysis-report.json"
     assert [event.event_type for event in _events(session_factory, "analysis-a")] == [
         "analysis_started",
-        "analysis_metrics_generated",
+        "analysis_preview_generated",
         "analysis_report_written",
         "analysis_started",
-        "analysis_metrics_generated",
+        "analysis_preview_generated",
         "analysis_report_written",
     ]
 
@@ -758,6 +795,8 @@ async def test_processing_invokes_agent_and_persists_exact_artifacts(
     session_factory: sessionmaker[Session],
     settings: Settings,
 ) -> None:
+    from app.agent import build_mock_runner
+
     _task(
         session_factory,
         settings,
@@ -770,6 +809,10 @@ async def test_processing_invokes_agent_and_persists_exact_artifacts(
         session_factory,
         settings,
         clock=lambda: FIXED_NOW,
+        runner_factory=lambda store, event_sink: build_mock_runner(
+            store,
+            event_sink=event_sink,
+        ),
     ).run("processing")
 
     assert [entry["name"] for entry in result.result_manifest["artifacts"]] == [
@@ -777,7 +820,7 @@ async def test_processing_invokes_agent_and_persists_exact_artifacts(
         "preview-demo.png",
         "manifest.json",
     ]
-    assert result.result_manifest["demo"] is True
+    assert result.result_manifest["demo"] is False
     assert result.result_manifest["summary"]["demo"] is True
     task_dir = settings.data_root / "tasks" / "processing"
     assert {path.name for path in task_dir.iterdir()} == {
@@ -812,6 +855,8 @@ async def test_processing_persists_tool_events_before_runner_completes(
     session_factory: sessionmaker[Session],
     settings: Settings,
 ) -> None:
+    from app.agent import build_mock_runner
+
     settings.mock_agent_step_delay_seconds = 0.2
     _task(
         session_factory,
@@ -821,9 +866,15 @@ async def test_processing_persists_tool_events_before_runner_completes(
         style=ProcessingStyle.BALANCED,
     )
     running = asyncio.create_task(
-        ProcessingTaskHandler(session_factory, settings).run(
-            "processing-incremental-events"
-        )
+        ProcessingTaskHandler(
+            session_factory,
+            settings,
+            runner_factory=lambda store, event_sink: build_mock_runner(
+                store,
+                step_delay_seconds=settings.mock_agent_step_delay_seconds,
+                event_sink=event_sink,
+            ),
+        ).run("processing-incremental-events")
     )
 
     for _ in range(50):

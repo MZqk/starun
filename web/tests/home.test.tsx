@@ -82,7 +82,7 @@ describe("home page", () => {
     expect(screen.getAllByText(/500 MB/).length).toBeGreaterThan(0);
     expect(screen.getByText(/24 小时/)).toBeInTheDocument();
     expect(screen.getByText(/仅保存在当前浏览器/)).toBeInTheDocument();
-    expect(screen.getAllByText(/Mock|演示/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/milestone/i).length).toBeGreaterThan(0);
   });
 
   it("uses landmarks and exposes every feature destination", () => {

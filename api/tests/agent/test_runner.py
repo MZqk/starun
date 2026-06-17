@@ -39,6 +39,8 @@ from app.artifacts.store import (
 from app.db.models import ProcessingStyle, TaskType
 from app.fits.schemas import BasicStatistics, FitsInspection, HduSummary
 from PIL import Image
+import numpy as np
+from astropy.io import fits
 
 EXPECTED_TOOLS = {
     ("mock.inspect", "v1"),
@@ -88,7 +90,8 @@ def make_context(
     task_dir = root / task_id
     task_dir.mkdir(parents=True, exist_ok=True)
     source_path = task_dir / "source.fits"
-    source_path.write_bytes(b"SIMPLE DEMO INPUT")
+    data = np.zeros((32, 48), dtype=np.float32)
+    fits.PrimaryHDU(data=data).writeto(source_path, overwrite=True)
     return TaskContext(
         task_id=task_id,
         task_type=TaskType.PROCESSING,
@@ -378,6 +381,10 @@ class StaticModel:
         del observation
         self._after_evaluate()
         return self._quality_score
+
+    async def summarize(self, context: TaskContext, result: ToolResult) -> dict[str, Any]:
+        del context, result
+        return {"demo": True}
 
 
 @pytest.mark.asyncio
@@ -703,7 +710,6 @@ def test_artifact_store_closes_directory_fd(tmp_path: Path) -> None:
         {"size": 10 * 1024 * 1024 + 1},
         {"sha256": "A" * 64},
         {"sha256": "0" * 63},
-        {"demo": False},
     ],
 )
 def test_artifact_descriptor_validation_is_strict(changes: dict[str, Any]) -> None:
@@ -923,11 +929,11 @@ class FailingArtifactStore(ArtifactStore):
         self._write_count = 0
         self._fail_on_write = fail_on_write
 
-    def write_bytes(self, name: str, data: bytes) -> ArtifactManifestEntry:
+    def write_bytes(self, name: str, data: bytes, *, demo: bool = False) -> ArtifactManifestEntry:
         self._write_count += 1
         if self._write_count == self._fail_on_write:
             raise OSError("simulated write failure")
-        return super().write_bytes(name, data)
+        return super().write_bytes(name, data, demo=demo)
 
 
 @pytest.mark.asyncio

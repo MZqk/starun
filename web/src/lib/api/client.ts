@@ -332,7 +332,7 @@ export function resolveApiBaseUrl(): string {
     process.env.NODE_ENV === "development" &&
     typeof window !== "undefined"
   ) {
-    return "http://localhost:8000";
+    return "http://127.0.0.1:8000";
   }
   if (typeof window !== "undefined" && !process.env.VITEST) {
     return window.location.origin;

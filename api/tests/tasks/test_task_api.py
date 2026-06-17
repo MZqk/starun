@@ -22,7 +22,11 @@ from app.db.models import (
     TaskEvent,
     TaskStatus,
     TaskType,
+    Upload,
+    UploadStatus,
 )
+import numpy as np
+from astropy.io import fits
 from app.db.session import create_engine_and_session
 from app.tasks.events import TaskEventService
 from app.tasks.handlers import ProcessingTaskHandler
@@ -46,7 +50,67 @@ def _task(
     source = input_path or settings.data_root / "uploads" / task_id / "input.fits"
     source.parent.mkdir(parents=True, exist_ok=True)
     if not source.exists():
-        source.write_bytes(b"SIMPLE FITS")
+        primary_hdu = fits.PrimaryHDU()
+        image_hdu1 = fits.ImageHDU(data=np.zeros((32, 48), dtype=np.float32), name="IMAGE_1")
+        image_hdu2 = fits.ImageHDU(data=np.zeros((32, 48), dtype=np.float32), name="IMAGE_2")
+        fits.HDUList([primary_hdu, image_hdu1, image_hdu2]).writeto(source, overwrite=True)
+
+    selected = {
+        "index": 2,
+        "name": "IMAGE_2",
+        "kind": "image",
+        "shape": [32, 48],
+        "dtype": "float32",
+        "supported": True,
+    }
+    validation_result = {
+        "hdus": [
+            {
+                "index": 0,
+                "name": "PRIMARY",
+                "kind": "primary_header",
+                "shape": [],
+                "dtype": "",
+                "supported": False,
+            },
+            {
+                "index": 1,
+                "name": "IMAGE_1",
+                "kind": "image",
+                "shape": [32, 48],
+                "dtype": "float32",
+                "supported": True,
+            },
+            selected,
+        ],
+        "selected_hdu": selected,
+        "statistics": {
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "mean": 0.4,
+            "median": 0.35,
+            "standard_deviation": 0.2,
+            "finite_pixel_count": 1536,
+        },
+        "header": {"OBJECT": "M42", "EXPTIME": 120.0},
+    }
+
+    upload = Upload(
+        id=f"{task_id}-upload",
+        client_id_hash=hash_identity("test-client"),
+        ip_hash=hash_identity("testclient"),
+        original_file_name="input.fits",
+        stored_path=str(source),
+        size_bytes=source.stat().st_size,
+        status=UploadStatus.READY,
+        validation_result=validation_result,
+        selected_hdu=2,
+        created_at=now - timedelta(minutes=5),
+        expires_at=now + timedelta(days=1),
+        claimed_at=now - timedelta(minutes=5),
+    )
+    session.add(upload)
+
     task = Task(
         id=task_id,
         type=task_type,
@@ -58,6 +122,7 @@ def _task(
         source_task_id=source_task_id,
         style=ProcessingStyle.BALANCED if task_type is TaskType.PROCESSING else None,
         selected_hdu=2,
+        upload=upload,
         input_path=str(source),
         error_code=error_code,
         error_message="internal detail" if error_code else None,
@@ -108,6 +173,8 @@ async def test_events_api_exposes_agent_progress_before_processing_completes(
     db_session: Session,
     settings: Settings,
 ) -> None:
+    from app.agent import build_mock_runner
+
     settings.mock_agent_step_delay_seconds = 0.2
     task = _task(
         db_session,
@@ -118,7 +185,15 @@ async def test_events_api_exposes_agent_progress_before_processing_completes(
     )
     factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
     running = asyncio.create_task(
-        ProcessingTaskHandler(factory, settings).run(task.id)
+        ProcessingTaskHandler(
+            factory,
+            settings,
+            runner_factory=lambda store, event_sink: build_mock_runner(
+                store,
+                step_delay_seconds=settings.mock_agent_step_delay_seconds,
+                event_sink=event_sink,
+            ),
+        ).run(task.id)
     )
 
     event_types: list[str] = []
