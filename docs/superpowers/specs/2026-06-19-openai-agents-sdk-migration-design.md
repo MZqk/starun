@@ -76,7 +76,7 @@ Analysis and processing share the default model configuration. The settings
 model may support per-feature overrides, but the initial migration will not add
 dynamic multi-provider routing.
 
-### 4.2 Agent Factories
+### 4.2 Sandbox Agent Factories
 
 Create two independent factories:
 
@@ -87,44 +87,67 @@ Each factory supplies:
 
 - a feature-specific system instruction;
 - the configured model;
-- one restricted local skill execution tool;
+- one native Agents SDK `Skills` capability containing only the assigned local
+  skill;
+- a minimal sandbox capability set;
 - SDK limits and guardrails;
 - a structured final-output model.
 
 The Analysis Agent can invoke only `deep-sky-advisor`. The Processing Agent can
 invoke only `deep-sky-processor`. Neither Agent can call the other.
 
-### 4.3 Restricted Local Skill Tool
+### 4.3 Native Sandbox Skill Execution
 
-Expose a narrow SDK function tool backed by a local subprocess. The tool
-invokes a fixed Starun-owned launcher for the assigned skill; it is not a
-general-purpose shell tool and does not accept arbitrary commands.
+Use the Agents SDK `SandboxAgent`, `Skills`, `Manifest`, and
+`UnixLocalSandboxClient` APIs. This is the SDK's native local `SKILL.md`
+execution model and preserves each skill's own instructions, scripts,
+references, and assets without Starun reimplementing skill semantics.
 
-This design keeps execution local while remaining usable with both Responses
-and Chat Completions model integrations. Provider-hosted shell execution is not
-part of the design.
+The Sandbox Agent API is currently beta. Starun accepts that dependency and
+will pin the SDK to a reviewed minor-version range. Upgrading that range
+requires rerunning provider, workspace, skill-isolation, cancellation, and
+artifact contract tests.
 
-The tool enforces:
+Each Agent receives a synthetic skills root containing only its assigned skill,
+for example a `Dir` with one `LocalDir` child. Starun does not point the SDK at
+the repository root because that would expose both skills to both Agents.
 
-- a fixed executable and skill directory;
-- a fixed task working directory;
-- a minimal environment-variable allowlist;
-- separate read-only input and writable output locations;
-- subprocess timeout and cancellation;
-- bounded stdout and stderr capture;
-- no command strings supplied by the model.
+The sandbox enforces:
+
+- a fresh workspace for every task;
+- one copied skill tree under the SDK auto-discovery root;
+- copied task inputs under `input/`;
+- a writable `output/` directory;
+- the minimum capabilities required by the selected skill;
+- session teardown on cancellation or timeout;
+- no persistent session, snapshot, or memory between Starun tasks.
+
+Starun does not add an unrestricted host function tool. All model-facing file
+and command execution occurs through the SDK sandbox session. Provider-hosted
+shell execution is not part of the design.
+
+`UnixLocalSandboxClient` is a workspace and lifecycle abstraction, not a
+strong operating-system security boundary. Shell commands execute inside the
+Starun API container and may inherit that container's readable filesystem and
+environment. The API container is therefore the security boundary: it runs as
+an unprivileged user, drops Linux capabilities, uses a read-only root
+filesystem except for `/data` and `/tmp`, mounts skills read-only, and receives
+only deployment-required secrets. A future requirement for hostile or
+third-party skills would require a separate Docker or remote sandbox worker.
 
 ### 4.4 Run Bridge
 
-The run bridge connects one Agents SDK run to one Starun task. It:
+The run bridge connects one Agents SDK sandbox run to one Starun task. It:
 
 - starts the appropriate Agent;
-- supplies the task input manifest;
+- creates a fresh sandbox session from the task manifest;
+- supplies the task input and single-skill manifest;
 - translates SDK lifecycle items into Starun task events;
 - checks task cancellation between streamed SDK items;
-- terminates an active skill subprocess when cancellation is requested;
+- closes and deletes the sandbox session when cancellation is requested;
 - applies model and tool-call limits;
 - validates the final structured output;
+- reads declared output files through the sandbox session before cleanup;
 - registers verified artifacts through `ArtifactStore`;
 - returns the existing handler-facing result shape.
 
@@ -134,12 +157,13 @@ skill.
 
 ## 5. Task Workspace and Data Contracts
 
-Every task receives an isolated workspace. A run never reuses model context,
-conversation state, or writable files from another task.
+Every task receives a fresh SDK sandbox workspace. A run never reuses model
+context, conversation state, sandbox session state, snapshots, memory, or
+writable files from another task.
 
 ### 5.1 Common Inputs
 
-The task handler prepares:
+The task handler supplies these manifest entries:
 
 - `input/source.fits`: the task source, exposed read-only to the skill;
 - `input/inspection.json`: Starun-validated HDU information, FITS headers, and
@@ -150,9 +174,9 @@ The task handler prepares:
 For processing tasks, `request.json` also includes the selected processing
 style.
 
-The Agent instruction receives absolute paths to these files. FITS headers,
-filenames, and other user-controlled content are data, never system
-instructions.
+The Agent instruction receives stable workspace-relative paths to these files.
+FITS headers, filenames, and other user-controlled content are data, never
+system instructions.
 
 ### 5.2 Common Outputs
 
@@ -257,7 +281,8 @@ written to task events.
 
 `SerialTaskExecutor` retains the overall analysis and processing timeouts. The
 run bridge additionally propagates cancellation to the active SDK run and
-skill subprocess. A cancelled or timed-out task publishes no partial result.
+tears down the sandbox session, including active shell processes. A cancelled
+or timed-out task publishes no partial result.
 
 Progress percentages remain coarse lifecycle values controlled by the
 handlers. They are not derived from model-generated estimates.
@@ -291,12 +316,14 @@ existing `STARUN_` settings prefix:
 - `STARUN_AGENT_PROTOCOL`
 - `STARUN_AGENT_TIMEOUT_SECONDS`
 - `STARUN_AGENT_MAX_TURNS`
+- `STARUN_ANALYSIS_SKILL_PATH`
+- `STARUN_PROCESSING_SKILL_PATH`
 - optional analysis and processing overrides if required by deployment
 
 Image-provider settings currently used directly by Starun are removed only if
 the opaque processing skill fully owns that provider integration. No skill
-internal configuration is assumed in this design; implementation must expose
-only the minimum required environment allowlist.
+internal configuration is assumed in this design. Deployment must expose only
+the environment variables required by Starun and the trusted local skills.
 
 Agents SDK tracing is disabled by default unless it can be configured not to
 upload sensitive task input. Starun task events and server logs remain the
@@ -326,16 +353,18 @@ The implementation will:
 
 1. add the OpenAI Agents SDK dependency;
 2. add `app/agent_sdk/`;
-3. migrate both task handlers to the new bridge;
-4. add skill result schemas and workspace preparation;
-5. update Docker configuration so both skills are present read-only in the API
+3. add the native Sandbox Agent, single-skill manifest, and session lifecycle
+   integration;
+4. migrate both task handlers to the new bridge;
+5. add skill result schemas and workspace preparation;
+6. update Docker configuration so both skills are present read-only in the API
    container;
-6. update provider-neutral environment configuration and operations
+7. update provider-neutral environment configuration and operations
    documentation;
-7. remove production dependencies on `KimiAnalysisClient`, custom
+8. remove production dependencies on `KimiAnalysisClient`, custom
    `AgentRunner`, `ToolRegistry`, fixed processing plans, and production
    processing tools;
-8. remove obsolete mocks, tests, configuration, and modules after confirming
+9. remove obsolete mocks, tests, configuration, and modules after confirming
    that no production or test call sites remain.
 
 There is no permanent feature flag for the old runtime. Unit and contract tests
@@ -354,10 +383,13 @@ provide the migration safety boundary.
 ### 12.2 Run Bridge Tests
 
 - SDK lifecycle items map to ordered Starun events.
-- Cancellation stops the run and active subprocess.
+- Each Agent manifest contains only its assigned skill.
+- Each task receives a fresh sandbox session.
+- Cancellation closes and deletes the session and active processes.
 - Task timeout stops execution and publishes no result.
 - Maximum turns and tool-call limits are enforced.
 - SDK and tool failures map to stable task errors.
+- The pinned SDK minor range passes the complete sandbox contract suite.
 
 ### 12.3 Skill Contract Tests
 
@@ -384,7 +416,8 @@ Reject:
 - missing declared artifacts;
 - output count and size violations;
 - unsupported file types;
-- model attempts to supply arbitrary commands or another skill name.
+- manifests that expose the other feature's skill;
+- output claims that reference files outside `output/`.
 
 ### 12.5 Handler and API Regression Tests
 
@@ -403,8 +436,8 @@ Reject:
 2. `/processing` invokes only the Processing Agent and `deep-sky-processor`.
 3. The default Responses provider and configured Chat Completions provider both
    pass provider and skill-contract tests.
-4. A cancellation terminates an active skill process and publishes no partial
-   artifacts.
+4. A cancellation tears down the active sandbox session and its processes and
+   publishes no partial artifacts.
 5. Invalid skill output cannot escape the task workspace or enter
    `result_manifest`.
 6. The frontend works without a required contract change.
