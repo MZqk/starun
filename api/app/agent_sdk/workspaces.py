@@ -1,4 +1,5 @@
 import json
+from hashlib import sha256
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,7 +26,9 @@ def build_task_manifest(
 ) -> Manifest:
     if not source_path.is_file():
         raise AgentNotConfiguredError("Task source file is missing.")
+    workspace_id = sha256(request.task_id.encode("utf-8")).hexdigest()
     return Manifest(
+        root=f"/tmp/starun-sandbox/{workspace_id}",
         entries={
             "input": Dir(
                 children={
