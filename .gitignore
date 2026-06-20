@@ -24,6 +24,10 @@ ENV/
 *.pyo
 *.pyd
 
+# --- StarNet2 Binaries ---
+**/StarNet2/
+
+
 # --- Local Environments / Secrets ---
 .env
 .env*.local

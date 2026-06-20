@@ -3,6 +3,7 @@
 install:
 	cd api && uv sync --extra dev
 	cd web && npm ci
+	python3 deep-sky-processor/scripts/download_starnet.py
 
 dev:
 	docker compose up --build
