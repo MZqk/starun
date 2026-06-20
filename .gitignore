@@ -62,7 +62,19 @@ pnpm-debug.log*
 .gemini/
 .codex/
 .agent/
+.workbuddy/
 openspec/
+
+# --- Code Analysis Tools ---
+.codegraph/
+.understand-anything/
+
+# --- Superpowers Generated Docs ---
+docs/superpowers/
+docs/feature-audit-*.md
 
 # --- Temporary Screenshots ---
 starun-home-*.png
+
+# --- Ad-hoc Utilities ---
+verify_okf.py
