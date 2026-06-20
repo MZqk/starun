@@ -1,5 +1,4 @@
 import asyncio
-import json
 import shutil
 import sqlite3
 from collections.abc import Callable, Generator
@@ -17,9 +16,9 @@ from sqlalchemy import Engine, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.config import Settings
 import numpy as np
 from astropy.io import fits
+from app.config import Settings
 from app.db.base import Base
 from app.db.session import get_db_session
 from app.db.models import (
@@ -34,11 +33,10 @@ from app.db.models import (
 )
 from app.db.session import create_engine_and_session
 from app.main import build_lifespan, create_app
-from app.agent.runner import AgentCancelledError
 from app.tasks import events as task_events
 from app.tasks.events import TaskEventService
 from app.tasks.executor import HandlerResult, SerialTaskExecutor, TaskHandlerError
-from app.tasks.handlers import AnalysisTaskHandler, ProcessingTaskHandler
+from app.tasks.handlers import ProcessingTaskHandler
 from app.tasks.recovery import recover_interrupted_tasks
 
 
@@ -697,210 +695,6 @@ async def test_executor_does_not_lease_when_another_task_is_running(
 
 
 @pytest.mark.asyncio
-async def test_analysis_writes_deterministic_mock_report_and_events(
-    session_factory: sessionmaker[Session],
-    settings: Settings,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from app.analysis import KimiAnalysisClient
-    from app.analysis.models import (
-        ProfessionalAnalysis,
-        ImageQuality,
-        VisualObservations,
-        AnalysisIssue,
-        ProcessingStep,
-    )
-
-    mock_analysis = ProfessionalAnalysis(
-        overview="Overview text",
-        image_quality=ImageQuality(rating="good", summary="Quality summary", confidence=0.9),
-        observations=VisualObservations(
-            target="M42",
-            background="Dark background",
-            stars="Round stars",
-            noise="Low noise",
-            color="Balanced color",
-        ),
-        issues=[
-            AnalysisIssue(
-                title="Slight bloating",
-                severity="low",
-                evidence="bloated stars",
-                recommendation="deconvolution",
-            )
-        ],
-        workflow=[
-            ProcessingStep(
-                order=1,
-                step="Denoise",
-                purpose="reduce noise",
-                guidance="apply denoise",
-            )
-        ],
-        caveats=["visual check only"],
-    )
-
-    async def mock_analyze(self, *args, **kwargs):
-        return mock_analysis
-
-    monkeypatch.setattr(KimiAnalysisClient, "analyze", mock_analyze)
-
-    _task(session_factory, settings, "analysis-a", TaskType.ANALYSIS)
-    _task(session_factory, settings, "analysis-b", TaskType.ANALYSIS)
-    different = _task(session_factory, settings, "analysis-c", TaskType.ANALYSIS)
-    assert different.input_path is not None
-    data = np.zeros((32, 48), dtype=np.float32)
-    fits.PrimaryHDU(data=data).writeto(different.input_path, overwrite=True)
-    handler = AnalysisTaskHandler(session_factory, settings, clock=lambda: FIXED_NOW)
-
-    first = await handler.run("analysis-a")
-    second = await handler.run("analysis-a")
-    same_source = await handler.run("analysis-b")
-    different_source = await handler.run("analysis-c")
-
-    report_path = settings.data_root / "tasks" / "analysis-a" / "analysis-report.json"
-    report = json.loads(report_path.read_text())
-    same_source_report = json.loads(
-        (settings.data_root / "tasks" / "analysis-b" / "analysis-report.json").read_text()
-    )
-    assert first == second
-    assert report == same_source_report
-    assert (
-        first.result_manifest["summary"]["analysis"]
-        == same_source.result_manifest["summary"]["analysis"]
-    )
-    assert (
-        first.result_manifest["summary"]["analysis"]["overview"]
-        == "Overview text"
-    )
-    assert first.result_manifest["demo"] is False
-    assert report["inspection"]["statistics"]["median"] == 0.35
-    assert report["input_metadata"]["size_bytes"] == same_source_report["input_metadata"]["size_bytes"]
-    assert len(report["input_metadata"]["sha256"]) == 64
-    assert report["analysis"]["overview"] == "Overview text"
-    assert first.result_manifest["artifacts"][0]["name"] == "analysis-preview.png"
-    assert first.result_manifest["artifacts"][1]["name"] == "analysis-report.json"
-    assert [event.event_type for event in _events(session_factory, "analysis-a")] == [
-        "analysis_started",
-        "analysis_preview_generated",
-        "analysis_report_written",
-        "analysis_started",
-        "analysis_preview_generated",
-        "analysis_report_written",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_processing_invokes_agent_and_persists_exact_artifacts(
-    session_factory: sessionmaker[Session],
-    settings: Settings,
-) -> None:
-    from app.agent import build_mock_runner
-
-    _task(
-        session_factory,
-        settings,
-        "processing",
-        TaskType.PROCESSING,
-        style=ProcessingStyle.BALANCED,
-    )
-
-    result = await ProcessingTaskHandler(
-        session_factory,
-        settings,
-        clock=lambda: FIXED_NOW,
-        runner_factory=lambda store, event_sink: build_mock_runner(
-            store,
-            event_sink=event_sink,
-        ),
-    ).run("processing")
-
-    assert [entry["name"] for entry in result.result_manifest["artifacts"]] == [
-        "result-demo.tiff",
-        "preview-demo.png",
-        "manifest.json",
-    ]
-    assert result.result_manifest["demo"] is False
-    assert result.result_manifest["summary"]["demo"] is True
-    task_dir = settings.data_root / "tasks" / "processing"
-    assert {path.name for path in task_dir.iterdir()} == {
-        "source.fits",
-        "result-demo.tiff",
-        "preview-demo.png",
-        "manifest.json",
-    }
-    assert [event.event_type for event in _events(session_factory, "processing")] == [
-        "agent_plan",
-        "agent_tool_started",
-        "agent_tool_finished",
-        "agent_tool_started",
-        "agent_tool_finished",
-        "agent_tool_started",
-        "agent_tool_finished",
-        "agent_tool_started",
-        "agent_tool_finished",
-        "agent_tool_started",
-        "agent_tool_finished",
-        "agent_tool_started",
-        "agent_tool_finished",
-        "agent_tool_started",
-        "agent_tool_finished",
-        "agent_evaluation",
-        "agent_completion",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_processing_persists_tool_events_before_runner_completes(
-    session_factory: sessionmaker[Session],
-    settings: Settings,
-) -> None:
-    from app.agent import build_mock_runner
-
-    settings.mock_agent_step_delay_seconds = 0.2
-    _task(
-        session_factory,
-        settings,
-        "processing-incremental-events",
-        TaskType.PROCESSING,
-        style=ProcessingStyle.BALANCED,
-    )
-    running = asyncio.create_task(
-        ProcessingTaskHandler(
-            session_factory,
-            settings,
-            runner_factory=lambda store, event_sink: build_mock_runner(
-                store,
-                step_delay_seconds=settings.mock_agent_step_delay_seconds,
-                event_sink=event_sink,
-            ),
-        ).run("processing-incremental-events")
-    )
-
-    for _ in range(50):
-        event_types = [
-            event.event_type
-            for event in _events(session_factory, "processing-incremental-events")
-        ]
-        if "agent_tool_started" in event_types:
-            break
-        await asyncio.sleep(0.01)
-    else:
-        pytest.fail("first agent tool event was not persisted during execution")
-
-    assert running.done() is False
-    assert "agent_completion" not in event_types
-    await running
-
-    final_types = [
-        event.event_type
-        for event in _events(session_factory, "processing-incremental-events")
-    ]
-    assert final_types.count("agent_tool_started") == 7
-    assert final_types[-1] == "agent_completion"
-
-
-@pytest.mark.asyncio
 async def test_processing_event_sink_failure_uses_executor_failure_path(
     session_factory: sessionmaker[Session],
     settings: Settings,
@@ -1157,57 +951,6 @@ async def test_cancellation_wins_when_requested_before_failure_commit(
         assert task.status is TaskStatus.CANCELLED
         assert task.error_code == "user_cancelled"
     assert [event.event_type for event in _events(session_factory, task.id)][-1] == "task_cancelled"
-
-
-@pytest.mark.asyncio
-async def test_processing_cancellation_callback_stops_agent(
-    session_factory: sessionmaker[Session],
-    settings: Settings,
-) -> None:
-    _task(
-        session_factory,
-        settings,
-        "cancel-agent",
-        TaskType.PROCESSING,
-        style=ProcessingStyle.REALISTIC,
-    )
-    entered = asyncio.Event()
-    release = asyncio.Event()
-
-    class BlockingRunner:
-        async def run(self, context: Any) -> None:
-            entered.set()
-            await release.wait()
-            assert context.cancellation_check() is True
-            raise AgentCancelledError()
-
-    handler = ProcessingTaskHandler(
-        session_factory,
-        settings,
-        runner_factory=lambda _store, _event_sink: BlockingRunner(),
-    )
-    executor = SerialTaskExecutor(
-        session_factory,
-        settings,
-        handlers={TaskType.PROCESSING: handler.run},
-        clock=lambda: FIXED_NOW,
-    )
-    running = asyncio.create_task(executor.run_until_idle())
-    await entered.wait()
-    with session_factory() as session:
-        task = session.get(Task, "cancel-agent")
-        assert task is not None
-        task.status = TaskStatus.CANCELLING
-        task.cancel_requested_at = FIXED_NOW
-        session.commit()
-    release.set()
-    await running
-
-    with session_factory() as session:
-        task = session.get(Task, "cancel-agent")
-        assert task is not None
-        assert task.status is TaskStatus.CANCELLED
-        assert task.error_code == "user_cancelled"
 
 
 @pytest.mark.asyncio

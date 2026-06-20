@@ -1,0 +1,16 @@
+.git
+.workbuddy
+.superpowers
+**/.DS_Store
+**/__pycache__
+**/*.py[cod]
+api/.env
+api/.mypy_cache
+api/.pytest_cache
+api/.ruff_cache
+api/.venv
+data
+starun.db
+web/.env.local
+web/.next
+web/node_modules

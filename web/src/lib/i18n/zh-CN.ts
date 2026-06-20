@@ -150,7 +150,7 @@ export const zhCN = {
       kicker: "专业分析",
       title: "读取真实 FITS，生成多模态专业分析",
       description:
-        "程序解析 HDU、头信息与基础统计，并把显示预览交给 Kimi 进行视觉分析和后期建议。",
+        "系统解析 FITS 元数据，并由专业深空分析 Agent 调用 deep-sky-advisor 生成分析与后期建议。",
       unnamedFile: "未命名 FITS",
       creating: "正在创建任务…",
       create: "开始专业分析",
@@ -178,7 +178,7 @@ export const zhCN = {
       median: "中位数",
       standardDeviation: "标准差",
       finitePixelCount: "有限像素",
-      aiKicker: "Kimi 多模态分析",
+      aiKicker: "专业分析 Agent",
       aiTitle: "专业解读与后期建议",
       previewTitle: "AI 分析所用预览",
       previewAriaLabel: "由 FITS 生成并发送给 AI 分析的显示预览",
@@ -217,7 +217,7 @@ export const zhCN = {
       kicker: "AI 自动出图",
       title: "选择一种风格，生成 AI 艺术增强成片",
       description:
-        "系统会从 FITS 生成参考预览，由 Kimi 给出艺术指导，再调用图片生成模型输出参考图约束下的成片。",
+        "系统由 AI 自动出图 Agent 调用 deep-sky-processor，在隔离工作区中生成参考图和艺术增强结果。",
       unnamedFile: "未命名 FITS",
       analysisSourceFile: "分析任务源文件",
       previewError: "预览加载失败。",
@@ -254,9 +254,7 @@ export const zhCN = {
       directionTitle: "AI 艺术指导",
       downloadLabel: "AI 自动出图产物",
       toolNames: {
-        "processing.prepare_reference": "生成 FITS 参考预览",
-        "processing.plan_art_direction": "Kimi 生成艺术指导",
-        "processing.generate_artwork": "图片模型生成成片",
+        "deep-sky-processor": "深空自动出图 Skill",
       } as Record<string, string>,
       expiredTitle: "处理结果已过期",
       resultUnavailable: "预览与下载结果已不可用。",
