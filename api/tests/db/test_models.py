@@ -23,12 +23,6 @@ from app.db.models import (
 )
 
 
-def test_mock_agent_step_delay_defaults_to_zero_and_rejects_negative_values() -> None:
-    assert Settings().mock_agent_step_delay_seconds == 0
-    with pytest.raises(ValueError):
-        Settings(mock_agent_step_delay_seconds=-0.01)
-
-
 def test_upload_and_task_defaults(db_session) -> None:
     upload = Upload(
         id="upload-1",

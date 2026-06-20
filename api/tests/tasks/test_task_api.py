@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from app.artifacts.store import ArtifactStore
 from app.config import Settings
@@ -29,7 +29,6 @@ import numpy as np
 from astropy.io import fits
 from app.db.session import create_engine_and_session
 from app.tasks.events import TaskEventService
-from app.tasks.handlers import ProcessingTaskHandler
 from app.usage.service import hash_identity
 
 
@@ -164,52 +163,6 @@ def _assert_error(response: Any, status: int, code: str) -> None:
     assert body["error_code"] == code
     assert body["retryable"] is False
     assert body["quota_charged"] is False
-
-
-@pytest.mark.asyncio
-async def test_events_api_exposes_agent_progress_before_processing_completes(
-    client: TestClient,
-    headers: dict[str, str],
-    db_session: Session,
-    settings: Settings,
-) -> None:
-    from app.agent import build_mock_runner
-
-    settings.mock_agent_step_delay_seconds = 0.2
-    task = _task(
-        db_session,
-        settings,
-        "api-incremental-events",
-        status=TaskStatus.RUNNING,
-        task_type=TaskType.PROCESSING,
-    )
-    factory = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
-    running = asyncio.create_task(
-        ProcessingTaskHandler(
-            factory,
-            settings,
-            runner_factory=lambda store, event_sink: build_mock_runner(
-                store,
-                step_delay_seconds=settings.mock_agent_step_delay_seconds,
-                event_sink=event_sink,
-            ),
-        ).run(task.id)
-    )
-
-    event_types: list[str] = []
-    for _ in range(50):
-        response = client.get(f"/api/tasks/{task.id}/events", headers=headers)
-        assert response.status_code == 200
-        event_types = [event["event_type"] for event in response.json()["events"]]
-        if "agent_tool_started" in event_types:
-            break
-        await asyncio.sleep(0.01)
-    else:
-        pytest.fail("events API did not expose tool progress during processing")
-
-    assert running.done() is False
-    assert "agent_completion" not in event_types
-    await running
 
 
 def test_get_task_is_owned_typed_and_does_not_expose_paths(

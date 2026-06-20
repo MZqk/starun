@@ -79,7 +79,6 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 ./node_modules/.bin/next dev --we
 | `STARUN_DAILY_TASK_LIMIT` | `5` | 每个浏览器客户端每日任务数量限制。 |
 | `STARUN_ANALYSIS_TIMEOUT_SECONDS` | `600` | 专业分析任务超时时间。 |
 | `STARUN_PROCESSING_TIMEOUT_SECONDS` | `3600` | AI 自动出图任务超时时间。 |
-| `STARUN_MOCK_AGENT_STEP_DELAY_SECONDS` | `0` | Mock Agent 步骤延迟，当前真实 AI 出图流程通常保持 0。 |
 | `STARUN_MIN_FREE_DISK_BYTES` | `5368709120` | 接收上传前要求的数据盘最小剩余空间，默认 5 GB。 |
 | `STARUN_WEB_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | 允许跨域访问 API 的 Web origin 列表。 |
 
@@ -87,17 +86,14 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 ./node_modules/.bin/next dev --we
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
-| `STARUN_AI_BASE_URL` | `https://api.moonshot.cn/v1` | OpenAI-compatible 文本/多模态模型 API 地址。 |
-| `STARUN_AI_API_KEY` | 空 | Kimi 等多模态模型服务端密钥。必须配置后才能执行真实 AI 分析和出图规划。 |
-| `STARUN_AI_MODEL` | `kimi-k2.6` | 专业分析和出图规划使用的模型。 |
-| `STARUN_AI_TIMEOUT_SECONDS` | `180` | 专业分析和出图规划请求超时时间。 |
-| `STARUN_IMAGE_AI_BASE_URL` | `https://tokenhub.tencentmaas.com/v1` | OpenAI-compatible 图片生成 API 地址。 |
-| `STARUN_IMAGE_AI_API_KEY` | 空 | 图片生成模型服务端密钥。 |
-| `STARUN_IMAGE_AI_MODEL` | `hy-image-v3.0` | AI 自动出图使用的图片生成模型。 |
-| `STARUN_IMAGE_AI_TIMEOUT_SECONDS` | `300` | 图片生成和下载请求超时时间。 |
-| `STARUN_IMAGE_AI_MAX_RESPONSE_BYTES` | `10485760` | 生成图片最大响应体大小，默认 10 MB。 |
-| `STARUN_IMAGE_AI_MAX_EDGE` | `1024` | 送入 AI 的参考预览图最长边。过大可能导致多模态请求不稳定。 |
-| `STARUN_IMAGE_AI_ALLOWED_DOWNLOAD_HOSTS` | `tokenhub.tencentmaas.com,aiart-1258344699.cos.ap-guangzhou.myqcloud.com` | 图片生成结果允许下载的固定 host 列表；代码同时允许 HTTPS 腾讯 COS 临时域名。 |
+| `STARUN_AGENT_BASE_URL` | `https://api.openai.com/v1` | OpenAI 或 OpenAI-compatible 模型 API 地址。 |
+| `STARUN_AGENT_API_KEY` | 空 | Agents SDK 使用的服务端密钥。 |
+| `STARUN_AGENT_MODEL` | `gpt-5.1` | 两个独立 Agent 默认使用的模型。 |
+| `STARUN_AGENT_PROTOCOL` | `responses` | `responses` 或 `chat_completions`，必须显式配置，不自动探测。 |
+| `STARUN_AGENT_TIMEOUT_SECONDS` | `180` | 单次模型请求超时时间。 |
+| `STARUN_AGENT_MAX_TURNS` | `8` | 单个 Agent run 的最大轮次。 |
+| `STARUN_ANALYSIS_SKILL_PATH` | `../deep-sky-advisor` | 专业分析 Agent 唯一可见的本地 skill。 |
+| `STARUN_PROCESSING_SKILL_PATH` | `../deep-sky-processor` | AI 自动出图 Agent 唯一可见的本地 skill。 |
 
 ## 功能边界
 
@@ -105,8 +101,8 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 ./node_modules/.bin/next dev --we
 
 - 首页产品介绍。
 - FITS 文件上传、HDU 扫描与选择、头信息、图像尺寸、位深和基础统计。
-- 专业分析：程序提取 FITS 元数据与基础统计，渲染预览图，再由多模态模型生成专业解读和后期建议。
-- AI 自动出图：复用 FITS 预览与统计数据，由 Kimi 生成出图方向，再调用图片生成模型基于参考图生成艺术增强结果。
+- 专业分析：独立 OpenAI Agents SDK Sandbox Agent 仅挂载 `deep-sky-advisor`，并将其结构化输出转换为现有分析报告。
+- AI 自动出图：独立 Sandbox Agent 仅挂载 `deep-sky-processor`，在任务工作区生成参考图、结果图和处理记录。
 - 历史记录：浏览器本地记录分析和处理任务，API 侧保留任务状态、事件和产物。
 
 当前限制：
@@ -114,6 +110,7 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 ./node_modules/.bin/next dev --we
 - 首版仅支持 FITS；XISF、TIFF、PNG/JPG 原图处理尚未纳入主流程。
 - AI 自动出图是基于预览图的艺术增强，不是严格可复现的天文线性后期流程，不适合科研测光或真实性验证。
 - 任务执行采用单机 SQLite 和串行 worker，适合 4 核 4 GB 级别服务器的早期部署，不适合高并发批处理。
+- Agents SDK 的 Sandbox/Skills API 当前锁定在 `0.14.x` beta；每个任务创建独立 session，不共享模型上下文或工作区。
 
 设计依据见
 [MVP 设计文档](docs/superpowers/specs/2026-06-11-starun-mvp-design.md)，

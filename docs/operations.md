@@ -43,3 +43,22 @@
   基线，也不承诺对 500 MB FITS 执行真实后期处理。
 - API 路由限流使用进程内 token bucket。状态不会跨进程共享，因此多
   worker/多副本部署不受支持，也不能提供一致限流。
+
+## Agent Sandbox 与 Skill
+
+- 每个任务创建新的 `UnixLocalSandboxClient` session；任务之间不共享
+  session、snapshot、模型上下文或可写文件。
+- Analysis Agent 仅装载 `STARUN_ANALYSIS_SKILL_PATH`，Processing Agent
+  仅装载 `STARUN_PROCESSING_SKILL_PATH`。
+- 容器中的 `/opt/starun-skills` 必须只读。不要把仓库根目录作为 Skills
+  source，否则两个 Agent 会看到不属于自己的 skill。
+- `STARUN_AGENT_PROTOCOL` 必须显式设为 `responses` 或
+  `chat_completions`。系统不会在请求失败后自动切换协议。
+- Agents SDK Sandbox/Skills API 当前为 beta，依赖锁定在 `0.14.x`。
+  升级该范围前必须重新验证 provider、workspace、取消、产物和页面流程。
+- SDK tracing 默认关闭，避免上传 FITS 输入、header 或 skill 输出。
+- `UnixLocalSandboxClient` 不是独立虚拟机；shell 命令仍在 API 容器内
+  执行。因此 API 必须使用 UID 10001、只读根文件系统、
+  `no-new-privileges` 和 `cap_drop: ALL`。当前仅信任仓库内置 skill。
+- 旧持久卷若由 root 创建，升级前需要一次性把 `/data` 所有权调整为
+  UID/GID 10001，否则 API 无法写入 SQLite 和任务产物。

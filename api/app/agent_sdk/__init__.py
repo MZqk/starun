@@ -12,12 +12,15 @@ from app.agent_sdk.errors import (
     SkillExecutionError,
     SkillOutputError,
 )
+from app.agent_sdk.runtime_types import AgentSdkRunSpec
 
 __all__ = [
     "AgentGuardrailError",
     "AgentNotConfiguredError",
     "AgentProviderError",
     "AgentRunCancelled",
+    "AgentSdkBridge",
+    "AgentSdkRunSpec",
     "AnalysisSkillResult",
     "ProcessingSkillResult",
     "PublishedSkillRun",
@@ -25,3 +28,4 @@ __all__ = [
     "SkillOutputError",
     "SkillRequest",
 ]
+from app.agent_sdk.bridge import AgentSdkBridge
