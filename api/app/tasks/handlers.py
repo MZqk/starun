@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.agent.contracts import TaskContext
 from app.agent.contracts import AgentEvent
 from app.agent.runner import AgentCancelledError, AgentGuardrailError, EventSink
+from app.agent_sdk.bridge import AgentSdkBridge
 from app.analysis import (
     KimiAnalysisClient,
     KimiAnalysisError,
@@ -169,13 +170,7 @@ class ProcessingTaskHandler:
         self._session_factory = session_factory
         self._settings = settings
         self._events = TaskEventService(session_factory, clock=clock)
-        self._runner_factory = runner_factory or (
-            lambda store, event_sink: build_processing_runner(
-                store,
-                settings=settings,
-                event_sink=event_sink,
-            )
-        )
+        self._bridge = bridge or AgentSdkBridge(settings)
 
     async def run(self, task_id: str) -> HandlerResult:
         task, inspection = self._load_task(task_id)
