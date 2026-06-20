@@ -15,9 +15,11 @@ COPY api/alembic ./alembic
 COPY api/app ./app
 COPY deep-sky-advisor /opt/starun-skills/deep-sky-advisor
 COPY deep-sky-processor /opt/starun-skills/deep-sky-processor
+COPY api/starnet2 /opt/starun-skills/deep-sky-processor/scripts/StarNet2
 RUN groupadd --gid 10001 starun \
     && useradd --uid 10001 --gid starun --create-home starun \
     && mkdir -p /data \
+    && find /opt/starun-skills/deep-sky-processor/scripts/StarNet2 -type f -exec chmod +x {} + \
     && chown -R starun:starun /app /data \
     && chmod -R a-w /opt/starun-skills
 

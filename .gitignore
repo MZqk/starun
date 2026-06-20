@@ -26,6 +26,9 @@ ENV/
 
 # --- StarNet2 Binaries ---
 **/StarNet2/
+!api/starnet2/
+api/starnet2/*
+!api/starnet2/.gitkeep
 
 
 # --- Local Environments / Secrets ---

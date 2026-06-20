@@ -6,6 +6,7 @@ import zipfile
 import platform
 import shutil
 import ssl
+import argparse
 
 # 忽略 HTTPS 证书校验，防止在某些容器或精简系统中因为缺少 CA 证书而报错
 try:
@@ -14,36 +15,60 @@ except AttributeError:
     pass
 
 def download_starnet():
+    parser = argparse.ArgumentParser(description="自动下载并解压部署 StarNet2 二进制程序。")
+    parser.add_argument(
+        "--platform",
+        choices=["local", "linux", "macos-arm64"],
+        default="local",
+        help="指定目标下载的平台环境 (local: 自动检测宿主机, linux: 强制 Linux x86_64, macos-arm64: 强制 macOS ARM64)"
+    )
+    parser.add_argument(
+        "--out",
+        help="指定输出部署的目标目录路径"
+    )
+    args = parser.parse_args()
+
     # 确定目标系统和架构
     system = platform.system().lower()
     machine = platform.machine().lower()
-    
-    print(f"[*] 检测到当前环境系统: {system}, 架构: {machine}")
     
     # 2.5.2 版本 CLI 下载地址
     LINUX_URL = "https://download.starnetastro.com/starnet2_linux_2.5.2-0207_ORT_x64_cli.zip"
     MACOS_ARM_URL = "https://download.starnetastro.com/starnet2_macos-arm64_2.5.2-0207_COREML_arm64_cli.zip"
     
     url = None
-    # 确定解压目标路径在 deep-sky-processor/scripts/StarNet2
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    target_dir = os.path.join(script_dir, "StarNet2")
+    target_platform = args.platform
     
-    if system == "linux":
-        # 即使是 ARM 架构（如在 Apple Silicon 宿主机上没有指定平台直接构建 Docker 镜像），
-        # 由于 StarNet2 官方未发布 Linux ARM64 版，我们也必须拉取 Linux x86_64 二进制文件。
+    if target_platform == "local":
+        print(f"[*] 检测到当前宿主机环境系统: {system}, 架构: {machine}")
+        if system == "linux":
+            url = LINUX_URL
+            target_platform = "linux"
+        elif system == "darwin" and ("arm64" in machine or "aarch64" in machine):
+            url = MACOS_ARM_URL
+            target_platform = "macos-arm64"
+        elif system == "darwin":
+            url = "https://download.starnetastro.com/starnet2_macos-x64_2.5.2-0207_ORT_x64_cli.zip"
+            target_platform = "macos-x64"
+            print("[*] 正在下载 macOS x64 (Intel) 版本的 StarNet2...")
+        else:
+            print(f"[!] 不支持的系统/架构类型: {system} {machine}。跳过 starnet2 自动下载。")
+            return
+    elif target_platform == "linux":
         url = LINUX_URL
-        if not ("x86_64" in machine or "amd64" in machine):
-            print("[!] 警告：Linux ARM64 架构下没有原生 StarNet2 二进制包，将尝试下载 Linux x86_64 并在 x64 模拟环境中运行")
-    elif system == "darwin" and ("arm64" in machine or "aarch64" in machine):
+    elif target_platform == "macos-arm64":
         url = MACOS_ARM_URL
-    elif system == "darwin":
-        # macOS Intel 芯片的临时兼容
-        url = "https://download.starnetastro.com/starnet2_macos-x64_2.5.2-0207_ORT_x64_cli.zip"
-        print("[*] 正在下载 macOS x64 (Intel) 版本的 StarNet2...")
+
+    # 确定解压目标路径
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if args.out:
+        target_dir = os.path.abspath(args.out)
     else:
-        print(f"[!] 不支持的系统/架构类型: {system} {machine}。跳过 starnet2 自动下载。")
-        return
+        if target_platform == "linux":
+            # Linux 版默认下载到宿主机的 api/starnet2 目录，方便 Docker Build 时打包
+            target_dir = os.path.abspath(os.path.join(script_dir, "..", "..", "api", "starnet2"))
+        else:
+            target_dir = os.path.join(script_dir, "StarNet2")
 
     # 创建目标文件夹
     os.makedirs(target_dir, exist_ok=True)
@@ -55,7 +80,7 @@ def download_starnet():
         return
 
     zip_path = os.path.join(target_dir, "starnet2.zip")
-    print(f"[*] 开始下载 StarNet2，来源地址: {url}")
+    print(f"[*] 开始下载 StarNet2 ({target_platform})，来源地址: {url}")
     
     try:
         # 下载文件
