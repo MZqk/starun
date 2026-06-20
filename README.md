@@ -115,3 +115,8 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 ./node_modules/.bin/next dev --we
 设计依据见
 [MVP 设计文档](docs/superpowers/specs/2026-06-11-starun-mvp-design.md)，
 部署和维护要求见 [运维说明](docs/operations.md)。
+
+## 开源协议
+
+Starun 使用 [GNU General Public License v3.0](LICENSE)，SPDX 标识为
+`GPL-3.0-only`。除另有明确声明的第三方内容外，本仓库代码均按该协议发布。

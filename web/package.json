@@ -1,6 +1,7 @@
 {
   "name": "starun-web",
   "private": true,
+  "license": "GPL-3.0-only",
   "scripts": {
     "dev": "next dev",
     "start": "next start",
