@@ -76,7 +76,7 @@ def download_artifact(
     except TaskCreationError as exc:
         return _error(exc.status_code, exc.error_code, exc.message)
     if (
-        task.status is not TaskStatus.COMPLETED
+        task.status not in {TaskStatus.COMPLETED, TaskStatus.REVIEW_REQUIRED}
         or task.expires_at is None
         or task.expires_at <= datetime.now(UTC)
         or not isinstance(task.result_manifest, dict)

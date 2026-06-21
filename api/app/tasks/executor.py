@@ -29,6 +29,7 @@ DatabaseResult = TypeVar("DatabaseResult")
 @dataclass(frozen=True)
 class HandlerResult:
     result_manifest: dict[str, Any]
+    terminal_status: TaskStatus = TaskStatus.COMPLETED
 
 
 class TaskCancelled(RuntimeError):
@@ -218,7 +219,11 @@ class SerialTaskExecutor:
                 )
                 return
             await self._retry_database_operation(
-                lambda: self._finish_completed(task_id, result),
+                lambda: (
+                    self._finish_review_required(task_id, result)
+                    if result.terminal_status is TaskStatus.REVIEW_REQUIRED
+                    else self._finish_completed(task_id, result)
+                ),
                 "commit task completion",
             )
         except TimeoutError:
@@ -271,7 +276,24 @@ class SerialTaskExecutor:
             )
 
     def _finish_completed(self, task_id: str, result: HandlerResult) -> None:
+        self._finish_terminal(task_id, result, TaskStatus.COMPLETED)
+
+    def _finish_review_required(self, task_id: str, result: HandlerResult) -> None:
+        self._finish_terminal(task_id, result, TaskStatus.REVIEW_REQUIRED)
+
+    def _finish_terminal(
+        self,
+        task_id: str,
+        result: HandlerResult,
+        terminal_status: TaskStatus,
+    ) -> None:
         now = self._clock()
+        review_required = terminal_status is TaskStatus.REVIEW_REQUIRED
+        if terminal_status not in {
+            TaskStatus.COMPLETED,
+            TaskStatus.REVIEW_REQUIRED,
+        }:
+            raise ValueError("handler returned an unsupported terminal status")
         with self._session_factory() as session:
             try:
                 transition = cast(
@@ -284,8 +306,12 @@ class SerialTaskExecutor:
                             Task.cancel_requested_at.is_(None),
                         )
                         .values(
-                            status=TaskStatus.COMPLETED,
-                            stage="completed",
+                            status=terminal_status,
+                            stage=(
+                                "review_required"
+                                if review_required
+                                else "completed"
+                            ),
                             progress=100,
                             result_manifest=result.result_manifest,
                             error_code=None,
@@ -300,9 +326,14 @@ class SerialTaskExecutor:
                     self._events.append_in_session(
                         session,
                         task_id,
-                        EventLevel.INFO,
-                        "task_completed",
-                        {"progress": 100},
+                        EventLevel.WARNING if review_required else EventLevel.INFO,
+                        "task_review_required" if review_required else "task_completed",
+                        {
+                            "progress": 100,
+                            "pipeline_status": (
+                                "review_required" if review_required else "success"
+                            ),
+                        },
                     )
                 else:
                     delete_requested = self._cancel_in_session_if_requested(

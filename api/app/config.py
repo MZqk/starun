@@ -13,13 +13,16 @@ class AgentProtocol(StrEnum):
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="STARUN_",
-        env_file=(".env", "api/.env"),
+        env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
 
     database_url: str = "sqlite:///./starun.db"
     data_root: Path = Path("./data")
+    analysis_skill_path: Path = Path("../deep-sky-advisor")
+    processing_skill_path: Path = Path("../deep-sky-processor")
+    agent_max_turns: int = 15
     max_upload_bytes: int = 500 * 1024 * 1024
     upload_ttl_seconds: int = 3600
     task_ttl_seconds: int = 86400
@@ -31,6 +34,7 @@ class Settings(BaseSettings):
     ai_api_key: SecretStr | None = None
     ai_model: str = "kimi-k2.6"
     ai_timeout_seconds: float = Field(default=180, gt=0, le=600)
+    agent_protocol: AgentProtocol = AgentProtocol.CHAT_COMPLETIONS
     image_ai_base_url: str = "https://tokenhub.tencentmaas.com/v1"
     image_ai_api_key: SecretStr | None = None
     image_ai_model: str = "hy-image-v3.0"

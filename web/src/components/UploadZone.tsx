@@ -21,6 +21,7 @@ function formatBytes(bytes: number): string {
 
 type UploadZoneProps = {
   disabled?: boolean;
+  initialFile?: File | null;
   onUploaded: (upload: UploadResponse, file: File) => void;
 };
 
@@ -41,6 +42,7 @@ function parseJson(text: string): unknown {
 
 export default function UploadZone({
   disabled = false,
+  initialFile = null,
   onUploaded,
 }: UploadZoneProps) {
   const copy = zhCN.task11.upload;
@@ -72,6 +74,8 @@ export default function UploadZone({
       xhrRef.current?.abort();
     };
   }, []);
+
+
 
   const uploadFile = useCallback(
     async (file: File) => {
@@ -168,6 +172,12 @@ export default function UploadZone({
       resetInput,
     ],
   );
+
+  useEffect(() => {
+    if (initialFile) {
+      void uploadFile(initialFile);
+    }
+  }, [initialFile, uploadFile]);
 
   const chooseFiles = useCallback(
     (files: FileList | null) => {

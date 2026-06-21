@@ -12,12 +12,18 @@ dependencies = [
   "fastapi>=0.115",
   "httpx>=0.27",
   "numpy>=2.1",
+  "opencv-python>=4.8",
   "openai-agents>=0.14.0,<0.15.0",
   "pillow>=11.0",
   "pydantic-settings>=2.5",
   "python-multipart>=0.0.20",
+  "PyWavelets>=1.5",
+  "scikit-image>=0.21",
+  "scipy>=1.10",
   "sqlalchemy>=2.0",
+  "tifffile>=2023.7",
   "uvicorn[standard]>=0.30",
+  "xisf>=0.9",
 ]
 
 [project.optional-dependencies]

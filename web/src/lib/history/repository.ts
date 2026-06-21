@@ -20,6 +20,7 @@ const TASK_STATUSES = new Set([
   "cancelling",
   "cancelled",
   "completed",
+  "review_required",
   "failed",
   "expired",
 ]);
@@ -43,6 +44,7 @@ const VALID_STATUS_TRANSITIONS: Record<TaskStatus, ReadonlySet<TaskStatus>> = {
     "cancelling",
     "cancelled",
     "completed",
+    "review_required",
     "failed",
     "expired",
   ]),
@@ -51,6 +53,7 @@ const VALID_STATUS_TRANSITIONS: Record<TaskStatus, ReadonlySet<TaskStatus>> = {
     "cancelling",
     "cancelled",
     "completed",
+    "review_required",
     "failed",
     "expired",
   ]),
@@ -58,11 +61,13 @@ const VALID_STATUS_TRANSITIONS: Record<TaskStatus, ReadonlySet<TaskStatus>> = {
     "cancelling",
     "cancelled",
     "completed",
+    "review_required",
     "failed",
     "expired",
   ]),
   cancelled: new Set(["cancelled", "expired"]),
   completed: new Set(["completed", "expired"]),
+  review_required: new Set(["review_required", "expired"]),
   failed: new Set(["failed", "expired"]),
   expired: new Set(["expired"]),
 };
@@ -178,7 +183,13 @@ function canTransition(from: TaskStatus, to: TaskStatus): boolean {
 }
 
 function isTerminalStatus(status: TaskStatus): boolean {
-  return ["cancelled", "completed", "failed", "expired"].includes(status);
+  return [
+    "cancelled",
+    "completed",
+    "review_required",
+    "failed",
+    "expired",
+  ].includes(status);
 }
 
 function summaryRichness(summary: JsonValue | null): number {

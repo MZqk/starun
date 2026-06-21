@@ -28,6 +28,7 @@ const TASK_STATUSES = new Set<TaskStatus>([
   "cancelling",
   "cancelled",
   "completed",
+  "review_required",
   "failed",
   "expired",
 ]);

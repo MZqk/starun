@@ -26,7 +26,11 @@ export default function TaskStatusPanel({
   const [currentTime, setCurrentTime] = useState(() => Date.now());
 
   useEffect(() => {
-    if (task?.status !== "completed" || task.expires_at === null) {
+    if (
+      !task ||
+      !["completed", "review_required"].includes(task.status) ||
+      task.expires_at === null
+    ) {
       return;
     }
     const expiryTime = new Date(task.expires_at).getTime();
@@ -60,7 +64,9 @@ export default function TaskStatusPanel({
   }
   const cancellable = status === "queued" || status === "running";
   const completedExpiry =
-    task?.status === "completed" && task.expires_at !== null
+    task &&
+    ["completed", "review_required"].includes(task.status) &&
+    task.expires_at !== null
       ? {
           formatted: new Date(task.expires_at).toLocaleString("zh-CN", {
             hour12: false,
@@ -132,6 +138,7 @@ export default function TaskStatusPanel({
           type="button"
         >
           {busy ? copy.cancelling : copy.cancel}
+          {!busy && <kbd className="shortcut-kbd">Esc</kbd>}
         </button>
       ) : null}
     </section>

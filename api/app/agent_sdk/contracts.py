@@ -94,6 +94,14 @@ class ProcessingSkillResult(BaseModel):
     result_width: int | None = Field(default=None, gt=0)
     result_height: int | None = Field(default=None, gt=0)
     provider_request_id: str | None = Field(default=None, max_length=200)
+    pipeline_status: Literal[
+        "success",
+        "partial_success",
+        "review_required",
+        "failed",
+    ]
+    quality_gates: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=32)
+    warnings: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=32)
     artifacts: list[SkillArtifactClaim] = Field(min_length=2, max_length=16)
 
     @model_validator(mode="after")
@@ -101,6 +109,8 @@ class ProcessingSkillResult(BaseModel):
         names = {artifact.name for artifact in self.artifacts}
         if not {self.reference_artifact, self.result_artifact} <= names:
             raise ValueError("processing artifacts are not declared")
+        if self.style is ProcessingStyle.BALANCED and "style-prompt.json" not in names:
+            raise ValueError("balanced processing must declare style-prompt.json")
         return self
 
 
@@ -110,3 +120,9 @@ class PublishedSkillRun(BaseModel):
     artifacts: list[ArtifactManifestEntry]
     summary: dict[str, JsonValue]
     quality_score: float | None = None
+    pipeline_status: Literal[
+        "success",
+        "partial_success",
+        "review_required",
+        "failed",
+    ] = "success"

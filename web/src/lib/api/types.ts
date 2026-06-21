@@ -4,6 +4,7 @@ export type TaskStatus =
   | "cancelling"
   | "cancelled"
   | "completed"
+  | "review_required"
   | "failed"
   | "expired";
 

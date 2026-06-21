@@ -6,31 +6,24 @@ from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.agent.contracts import TaskContext
-from app.agent.contracts import AgentEvent
-from app.agent.runner import AgentCancelledError, AgentGuardrailError, EventSink
 from app.agent_sdk.bridge import AgentSdkBridge
-from app.analysis import (
-    KimiAnalysisClient,
-    KimiAnalysisError,
-    KimiConfigurationError,
-    render_fits_preview,
+from app.agent_sdk.errors import (
+    AgentGuardrailError,
+    AgentNotConfiguredError,
+    AgentProviderError,
+    AgentRunCancelled,
+    SkillExecutionError,
+    SkillOutputError,
 )
 from app.artifacts.store import ArtifactStore
 from app.config import Settings
-from app.db.models import EventLevel, ProcessingStyle, Task, TaskStatus, TaskType
+from app.db.models import EventLevel, Task, TaskStatus, TaskType
 from app.fits.schemas import FitsInspection
 from app.filesystem import (
     copy_regular_file_at,
     open_directory_fd,
     open_relative_directory_fd,
     relative_path_components,
-)
-from app.processing import build_processing_runner
-from app.processing.art_direction import KimiArtDirectionError
-from app.processing.image_provider import (
-    ImageProviderConfigurationError,
-    ImageProviderError,
 )
 from app.tasks.events import TaskEventService
 from app.tasks.executor import HandlerResult, TaskCancelled, TaskHandlerError
@@ -178,6 +171,8 @@ class ProcessingTaskHandler:
             raise TaskCancelled()
         if inspection is None:
             raise ValueError("processing FITS inspection is missing")
+        if task.style is None:
+            raise ValueError("processing style is missing")
         task_dir = self._settings.data_root / "tasks" / task_id
         source_path = task_dir / "source.fits"
         if task.input_path is None:
@@ -203,12 +198,8 @@ class ProcessingTaskHandler:
                 spec = self._bridge.build_processing_spec(
                     task_id=task.id,
                     source_path=source_path,
-                    fits_inspection=inspection,
-                    basic_metadata={
-                        "selected_hdu": task.selected_hdu,
-                        "input_size": input_size,
-                    },
-                    cancellation_check=lambda: self._cancel_requested(task_id),
+                    inspection=inspection,
+                    style=task.style,
                 )
                 persist_event = self._event_sink(task_id)
                 with ArtifactStore.from_directory_fd(task_dir, task_dir_fd) as store:
@@ -222,29 +213,31 @@ class ProcessingTaskHandler:
                 os.close(task_dir_fd)
         except AgentRunCancelled as exc:
             raise TaskCancelled() from exc
-        except AgentGuardrailError as exc:
-            raise TaskHandlerError("agent_guardrail", "Agent output was rejected.", False) from exc
-        except KimiArtDirectionError as exc:
-            raise TaskHandlerError("art_direction_failed", str(exc), exc.retryable) from exc
-        except ImageProviderConfigurationError as exc:
-            raise TaskHandlerError("image_provider_not_configured", str(exc), False) from exc
-        except ImageProviderError as exc:
-            raise TaskHandlerError(exc.code, str(exc), exc.retryable) from exc
+        except (
+            AgentNotConfiguredError,
+            AgentProviderError,
+            AgentGuardrailError,
+            SkillExecutionError,
+            SkillOutputError,
+        ) as exc:
+            raise _task_handler_error(exc) from exc
         finally:
             os.close(data_root_fd)
 
         self._set_stage(task_id, "agent_complete", 90)
         return HandlerResult(
             result_manifest={
-                "artifacts": [artifact.model_dump(mode="json") for artifact in result.artifacts],
-                "summary": result.summary,
-                "quality_score": result.quality_score,
-                "plan": result.plan.model_dump(mode="json"),
-                "inspection": (
-                    inspection.model_dump(mode="json") if inspection is not None else None
-                ),
+                "artifacts": [artifact.model_dump(mode="json") for artifact in run.artifacts],
+                "summary": run.summary,
+                "quality_score": run.quality_score,
+                "inspection": inspection.model_dump(mode="json"),
                 "demo": False,
-            }
+            },
+            terminal_status=(
+                TaskStatus.REVIEW_REQUIRED
+                if run.pipeline_status == "review_required"
+                else TaskStatus.COMPLETED
+            ),
         )
 
     def _load_task(self, task_id: str) -> tuple[Task, FitsInspection | None]:

@@ -1,10 +1,13 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
-from agents.sandbox import Manifest, SandboxAgent
+from agents import Agent
+from agents.sandbox import Manifest
 
 from app.db.models import ProcessingStyle, TaskType
+from app.fits.schemas import FitsInspection
 
 EventEmitter = Callable[[str, dict[str, object]], Awaitable[None]]
 
@@ -18,9 +21,11 @@ class AgentSdkRunSpec:
     skill_name: str
     result_path: str
     max_turns: int
-    agent: SandboxAgent[None]
+    agent: Agent[None]
     manifest: Manifest
     input_text: str
+    source_path: Path
+    inspection: FitsInspection
 
 
 class AgentSdkRuntime(Protocol):

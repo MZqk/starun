@@ -768,9 +768,12 @@ button {
 }
 
 .resource-note {
-  border-left: 2px solid rgba(217, 136, 46, 0.52);
-  padding: 0.25rem 0 0.25rem 1.2rem;
+  border: 1px solid rgba(217, 136, 46, 0.18);
+  background: rgba(217, 136, 46, 0.04);
+  border-radius: 6px;
+  padding: 0.6rem 0.9rem;
   font-size: 0.82rem;
+  color: var(--color-space-text-secondary);
 }
 
 .site-footer {
@@ -1186,16 +1189,20 @@ progress::-moz-progress-bar {
 
 .form-error {
   margin: 0;
-  border-left: 2px solid var(--color-space-accent);
-  padding: 0.55rem 0 0.55rem 0.9rem;
+  border: 1px solid rgba(217, 56, 46, 0.18);
+  background: rgba(217, 56, 46, 0.05);
+  border-radius: 6px;
+  padding: 0.6rem 0.9rem;
   color: #e89a94;
   font-size: 0.84rem;
 }
 
 .storage-warning {
   margin: 0;
-  border-left: 2px solid var(--color-space-amber);
-  padding: 0.55rem 0 0.55rem 0.9rem;
+  border: 1px solid rgba(217, 136, 46, 0.18);
+  background: rgba(217, 136, 46, 0.04);
+  border-radius: 6px;
+  padding: 0.6rem 0.9rem;
   color: var(--color-space-amber);
   font-size: 0.8rem;
 }
@@ -1306,6 +1313,11 @@ progress::-moz-progress-bar {
   box-shadow: 0 0 0 5px rgba(125, 155, 118, 0.1);
 }
 
+.status-dot--review_required {
+  background: #d9a62e;
+  box-shadow: 0 0 0 5px rgba(217, 166, 46, 0.12);
+}
+
 .status-dot--failed {
   background: var(--color-space-accent);
   box-shadow: 0 0 0 5px rgba(217, 56, 46, 0.1);
@@ -1405,8 +1417,10 @@ progress::-moz-progress-bar {
 }
 
 .metric-cards div {
-  border-left: 2px solid rgba(217, 136, 46, 0.42);
-  padding: 0.35rem 0 0.35rem 0.8rem;
+  border: 1px solid var(--color-space-border);
+  background: var(--color-space-surface);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
 }
 
 .metric-cards dd {
@@ -1439,7 +1453,8 @@ progress::-moz-progress-bar {
 }
 
 .metric-cards--real div {
-  border-left-color: rgba(125, 155, 118, 0.55);
+  border-color: rgba(125, 155, 118, 0.18);
+  background: rgba(125, 155, 118, 0.03);
 }
 
 .ai-analysis-panel {
@@ -1509,8 +1524,10 @@ progress::-moz-progress-bar {
 
 .analysis-quality div,
 .analysis-observations div {
-  border-left: 2px solid rgba(125, 155, 118, 0.55);
-  padding-left: 0.8rem;
+  border: 1px solid rgba(125, 155, 118, 0.18);
+  background: rgba(125, 155, 118, 0.03);
+  border-radius: 6px;
+  padding: 0.5rem 0.8rem;
 }
 
 .analysis-quality dt,
@@ -1873,6 +1890,11 @@ progress::-moz-progress-bar {
   color: var(--color-space-green);
 }
 
+.history-status--review_required {
+  border-color: rgba(217, 166, 46, 0.45);
+  color: #d9a62e;
+}
+
 .history-status--failed,
 .history-status--expired {
   border-color: rgba(217, 56, 46, 0.4);
@@ -1961,3 +1983,278 @@ progress::-moz-progress-bar {
     grid-template-columns: 1fr;
   }
 }
+
+/* History Card Improvements */
+.history-card {
+  display: flex;
+  gap: 1.25rem;
+  align-items: flex-start;
+}
+
+.history-card__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.task-thumbnail {
+  position: relative;
+  width: 90px;
+  height: 90px;
+  border-radius: 8px;
+  border: 1px solid rgba(42, 42, 48, 0.7);
+  overflow: hidden;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.8);
+}
+
+.task-thumbnail__star {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 3px #fff;
+}
+
+.task-thumbnail__grid {
+  position: absolute;
+  inset: 0;
+  background: 
+    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+  background-size: 15px 15px;
+}
+
+.history-card__id-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+}
+
+.history-card__id {
+  font-family: var(--type-mono);
+  font-size: 0.72rem;
+  color: var(--color-space-text-muted);
+}
+
+.copy-id-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--color-space-text-muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+  transition: all 150ms ease;
+}
+
+.copy-id-btn:hover {
+  color: var(--color-space-text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+@media (max-width: 620px) {
+  .history-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .task-thumbnail {
+    width: 100%;
+    height: 100px;
+  }
+}
+
+/* Tooltips */
+.tooltip-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+}
+
+.tooltip-card {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-8px);
+  width: 210px;
+  padding: 0.65rem 0.8rem;
+  background: var(--color-space-card);
+  border: 1px solid var(--color-space-border);
+  border-radius: 6px;
+  color: var(--color-space-text);
+  font-size: 0.76rem;
+  font-weight: normal;
+  line-height: 1.4;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 150ms ease, transform 150ms ease;
+  z-index: 100;
+  text-align: left;
+}
+
+.tooltip-card::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 5px;
+  border-style: solid;
+  border-color: var(--color-space-border) transparent transparent transparent;
+}
+
+.tooltip-trigger:hover .tooltip-card {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(-4px);
+}
+
+/* Keyboard Shortcut Kbd */
+.shortcut-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 1.1rem;
+  padding: 0 0.3rem;
+  margin-left: 0.5rem;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.15), 0 1px 2px rgba(0, 0, 0, 0.4);
+  color: var(--color-space-text-secondary);
+  font-family: var(--type-mono);
+  font-size: 0.65rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+/* Drag and Drop Overlay */
+.drag-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 8, 10, 0.88);
+  backdrop-filter: blur(10px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed rgba(217, 56, 46, 0.35);
+  margin: 1.25rem;
+  border-radius: 1.25rem;
+  box-shadow: 0 0 30px rgba(217, 56, 46, 0.08);
+  transition: all 150ms ease;
+  animation: fadeInOverlay 200ms ease-out;
+  pointer-events: none;
+}
+
+.drag-overlay__content {
+  text-align: center;
+  color: var(--color-space-text);
+}
+
+.drag-overlay__content svg {
+  color: var(--color-space-accent);
+  animation: pulseUpload 1.5s infinite ease-in-out;
+  margin-bottom: 1rem;
+  margin-inline: auto;
+}
+
+.drag-overlay__content p {
+  font-size: 1.15rem;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+}
+
+@keyframes fadeInOverlay {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pulseUpload {
+  0%, 100% { transform: translateY(0); opacity: 0.85; }
+  50% { transform: translateY(-8px); opacity: 1; }
+}
+
+/* Starfield twinkle animation */
+.starfield {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.star {
+  position: absolute;
+  width: 1.5px;
+  height: 1.5px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 4px #fff;
+  opacity: 0.3;
+}
+
+.star--1 {
+  top: 15%;
+  left: 20%;
+  background: #ffb0a0;
+  box-shadow: 0 0 5px #ffb0a0;
+  width: 2px;
+  height: 2px;
+  animation: twinkle 4s infinite ease-in-out;
+}
+
+.star--2 {
+  top: 35%;
+  left: 75%;
+  animation: twinkle 3s infinite ease-in-out;
+  animation-delay: 0.8s;
+}
+
+.star--3 {
+  top: 65%;
+  left: 12%;
+  animation: twinkle 5s infinite ease-in-out;
+  animation-delay: 1.5s;
+}
+
+.star--4 {
+  top: 80%;
+  left: 85%;
+  background: #ffb0a0;
+  box-shadow: 0 0 5px #ffb0a0;
+  width: 2px;
+  height: 2px;
+  animation: twinkle 4.5s infinite ease-in-out;
+  animation-delay: 2.2s;
+}
+
+.star--5 {
+  top: 50%;
+  left: 55%;
+  animation: twinkle 3.5s infinite ease-in-out;
+  animation-delay: 2.9s;
+}
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.25; transform: scale(0.8); }
+  50% { opacity: 0.95; transform: scale(1.2); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .star {
+    animation: none !important;
+  }
+}
+
+
+
+
+

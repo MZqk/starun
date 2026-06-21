@@ -15,6 +15,7 @@ import { zhCN } from "../lib/i18n/zh-CN";
 const TERMINAL_STATUSES = new Set<TaskStatus>([
   "cancelled",
   "completed",
+  "review_required",
   "failed",
   "expired",
 ]);
@@ -104,7 +105,8 @@ export function useTaskPolling(taskId: string | null): TaskPollingResult {
         .updateStatus(taskId, nextTask.status, {
           expiresAt: nextTask.expires_at,
           resultAvailable:
-            nextTask.status === "completed" &&
+            (nextTask.status === "completed" ||
+              nextTask.status === "review_required") &&
             nextTask.result.manifest_available,
           summary: historySummary(nextTask),
         })

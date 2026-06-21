@@ -70,6 +70,7 @@ EVENT_KEY_ALLOWLISTS = {
     "restart_interrupted": {"error_code"},
     "task_cancelled": set(),
     "task_completed": {"progress"},
+    "task_review_required": {"progress", "pipeline_status"},
     "task_failed": {"diagnostic_id", "error_code", "message", "retryable"},
     "task_started": {"task_type"},
     "task_timeout": {"error_code"},

@@ -85,6 +85,7 @@ class TaskStatus(StrEnum):
     CANCELLING = "cancelling"
     CANCELLED = "cancelled"
     COMPLETED = "completed"
+    REVIEW_REQUIRED = "review_required"
     FAILED = "failed"
     EXPIRED = "expired"
 

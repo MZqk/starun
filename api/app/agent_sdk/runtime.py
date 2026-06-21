@@ -15,6 +15,8 @@ class OpenAiSandboxRuntime:
         self._session: SandboxSession | None = None
 
     async def run(self, spec: AgentSdkRunSpec, emit: EventEmitter) -> object:
+        if spec.style is not None and spec.style.value == "artistic":
+            raise RuntimeError("artistic processing does not use the skill sandbox runtime")
         self._session = await self._client.create(manifest=spec.manifest)
         await emit("run_started", {"agent": spec.agent_name})
         await emit(

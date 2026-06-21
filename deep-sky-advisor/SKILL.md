@@ -85,6 +85,10 @@ Run from the skill directory:
 bash scripts/run_analysis.sh <image_file_path> [output_directory]
 ```
 
+The launcher uses the fixed preinstalled `python` runtime exposed by Starun.
+It must not create a virtual environment, install packages, or override Python
+runtime environment variables while handling a request.
+
 The launcher executes `scripts/analyze_file.py` and currently produces:
 
 - `<image_stem>_analysis.json`;

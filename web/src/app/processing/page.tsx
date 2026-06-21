@@ -24,18 +24,21 @@ import { zhCN } from "../../lib/i18n/zh-CN";
 
 const historyRepository = new TaskHistoryRepository();
 const STYLE_VALUES: ProcessingStyle[] = ["realistic", "balanced", "artistic"];
-const FALLBACK_AGENT_STEPS = [
-  "processing.prepare_reference",
-  "processing.plan_art_direction",
-  "processing.generate_artwork",
-] as const;
+const FALLBACK_AGENT_STEPS: Record<ProcessingStyle, readonly string[]> = {
+  realistic: ["deep-sky-processor"],
+  balanced: ["kimi.style_prompt", "deep-sky-processor"],
+  artistic: ["kimi.art_direction", "tencent.hunyuan_image"],
+};
 
 function stringPayload(event: TaskEventResponse, key: string): string | null {
   const value = event.payload[key];
   return typeof value === "string" ? value : null;
 }
 
-function planSteps(events: TaskEventResponse[]): Array<{
+function planSteps(
+  events: TaskEventResponse[],
+  style: ProcessingStyle,
+): Array<{
   id: string;
   toolName: string;
 }> {
@@ -52,7 +55,7 @@ function planSteps(events: TaskEventResponse[]): Array<{
   });
   return steps.length > 0
     ? steps
-    : FALLBACK_AGENT_STEPS.map((toolName, index) => ({
+    : FALLBACK_AGENT_STEPS[style].map((toolName, index) => ({
         id: String(index + 1).padStart(2, "0"),
         toolName,
       }));
@@ -127,8 +130,10 @@ export default function ProcessingPage() {
   }, [copy.analysisSourceFile]);
 
   const summary = objectValue(task?.result.summary);
+  const resultAvailable =
+    task?.status === "completed" || task?.status === "review_required";
   const resultFresh =
-    task?.status === "completed" &&
+    resultAvailable &&
     (task.expires_at === null || new Date(task.expires_at).getTime() > currentTime);
   const referenceArtifactName = resultFresh
     ? stringValue(summary?.reference_artifact) ??
@@ -184,7 +189,7 @@ export default function ProcessingPage() {
   }, [copy.previewError, referenceArtifactName, resultArtifactName, taskId]);
 
   useEffect(() => {
-    if (task?.status !== "completed" || task.expires_at === null) return;
+    if (!resultAvailable || task?.expires_at === null) return;
     const expiryTime = new Date(task.expires_at).getTime();
     const remaining = expiryTime - Date.now();
     if (remaining <= 0) {
@@ -196,10 +201,10 @@ export default function ProcessingPage() {
       Math.min(remaining + 1, 2_147_000_000),
     );
     return () => clearTimeout(timer);
-  }, [task?.expires_at, task?.id, task?.status]);
+  }, [resultAvailable, task?.expires_at, task?.id]);
 
   const resultExpired =
-    task?.status === "completed" &&
+    resultAvailable &&
     task.expires_at !== null &&
     new Date(task.expires_at).getTime() <= currentTime;
 
@@ -278,7 +283,7 @@ export default function ProcessingPage() {
     }
   }
 
-  const agentSteps = useMemo(() => planSteps(events), [events]);
+  const agentSteps = useMemo(() => planSteps(events, style), [events, style]);
   const inspection = objectValue(task?.inspection);
   const selectedHdu = objectValue(inspection?.selected_hdu);
   const statistics = objectValue(inspection?.statistics);
@@ -406,7 +411,7 @@ export default function ProcessingPage() {
 
         {taskId ? <TaskEventLog events={events} /> : null}
 
-        {task?.status === "completed" && !resultExpired ? (
+        {resultAvailable && !resultExpired ? (
           <>
             <section className="comparison-panel" aria-label={copy.comparisonAriaLabel}>
               <div className="comparison-frame comparison-frame--before">

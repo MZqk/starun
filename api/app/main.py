@@ -1,7 +1,12 @@
 from contextlib import AbstractAsyncContextManager
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+import logging
+import os
 from typing import cast
+
+from dotenv import load_dotenv
+load_dotenv()
 
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
@@ -131,5 +136,14 @@ def create_app(
     application.add_api_route("/api/health", health, methods=["GET"])
     return application
 
+
+_log_level = os.getenv("STARUN_LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, _log_level, logging.INFO),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    force=True,
+)
+for _name in ("agents", "openai", "httpx", "app"):
+    logging.getLogger(_name).setLevel(logging.DEBUG if _log_level == "DEBUG" else logging.INFO)
 
 app = create_app()

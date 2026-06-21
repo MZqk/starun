@@ -18,6 +18,7 @@ Deep-Sky Image Diagnostic Analyzer (深空图像诊断分析器)
   python analyze.py <input_image>                    # 输出 JSON 到 stdout
   python analyze.py <input_image> --format readable  # 人类可读格式
   python analyze.py <input_image> --output report.json
+  python analyze.py <input_image> --format readable --output report.txt
 """
 
 import argparse
@@ -1084,6 +1085,13 @@ def main():
                    help='输出格式 (默认: json)')
     p.add_argument('--output', '-o', default=None, help='输出到文件')
     args = p.parse_args()
+
+    if (
+        args.output
+        and args.format == 'readable'
+        and Path(args.output).suffix.lower() == '.json'
+    ):
+        p.error('--format readable 不能写入 .json 文件；请使用 --format json 或改用 .txt 扩展名')
 
     report = analyze_image(args.input)
 

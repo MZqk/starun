@@ -10,7 +10,7 @@ dev:
 	docker compose up --build
 
 dev-api:
-	cd api && uv run alembic upgrade head && uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+	cd api && uv run alembic upgrade head && uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --log-level debug
 
 dev-web:
 	cd web && STARUN_API_PROXY_TARGET=http://localhost:8000 npm run dev

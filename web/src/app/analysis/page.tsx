@@ -15,6 +15,7 @@ import type {
 } from "../../lib/api/types";
 import { TaskHistoryRepository } from "../../lib/history/repository";
 import { zhCN } from "../../lib/i18n/zh-CN";
+import { fileTransfer } from "../../lib/transfer";
 
 const historyRepository = new TaskHistoryRepository();
 
@@ -45,11 +46,27 @@ function resumedTaskId(): string | null {
   return new URLSearchParams(window.location.search).get("task");
 }
 
+const OBSERVATION_EXPLANATIONS: Record<string, string> = {
+  "主体与构图": "分析星系、星云等星体目标的信噪比及在画幅中的位置与裁剪建议。",
+  "背景与梯度": "评估天光背景的平整度，检测是否存在光害梯度、暗角或平场校准残留。",
+  "星点": "检测星点的半专宽 (FWHM)、椭圆率 (星点变型) 以及反卷积极限。",
+  "噪声": "评估图像中高频噪声与低频噪声的分布，指导后期降噪的强度与算法选择。",
+  "色彩": "通过恒星色彩校准 (PCC) 指标，分析红绿蓝通道的平衡及发射星云的色彩表现。"
+};
+
 export default function AnalysisPage() {
   const copy = zhCN.task11.analysis;
+  const [initialFile, setInitialFile] = useState<File | null>(null);
   const [upload, setUpload] = useState<UploadResponse | null>(null);
   const [fileName, setFileName] = useState<string>(copy.unnamedFile);
   const [taskId, setTaskId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const transferFile = fileTransfer.get();
+    if (transferFile) {
+      setInitialFile(transferFile);
+    }
+  }, []);
   const [initialStatus, setInitialStatus] = useState<TaskStatus | null>(null);
   const [creating, setCreating] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -222,6 +239,37 @@ export default function AnalysisPage() {
     };
   }, [copy.previewError, previewName, taskId]);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isEditable =
+        activeEl &&
+        (activeEl.tagName === "INPUT" ||
+          activeEl.tagName === "TEXTAREA" ||
+          activeEl.getAttribute("contenteditable") === "true");
+      if (isEditable) return;
+
+      if (event.key === "Enter" && !taskId && upload && !creating) {
+        event.preventDefault();
+        void createTask();
+      }
+
+      const isActiveTask = task && ["queued", "running"].includes(task.status);
+      if (event.key === "Escape" && taskId && isActiveTask && !cancelling) {
+        event.preventDefault();
+        void cancelTask();
+      }
+
+      if ((event.key === "p" || event.key === "P") && sourceValid && taskId) {
+        event.preventDefault();
+        window.location.href = `/processing?source_task_id=${encodeURIComponent(taskId)}`;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [taskId, upload, creating, task, cancelling, sourceValid]);
+
   const activePreview =
     preview?.taskId === taskId ? preview : null;
 
@@ -236,7 +284,7 @@ export default function AnalysisPage() {
 
         {!taskId ? (
           <>
-            <UploadZone onUploaded={handleUploaded} />
+            <UploadZone initialFile={initialFile} onUploaded={handleUploaded} />
             <div className="workflow-action-row">
               <button
                 className="button button--primary"
@@ -245,6 +293,7 @@ export default function AnalysisPage() {
                 type="button"
               >
                 {creating ? copy.creating : copy.create}
+                {!creating && upload && <kbd className="shortcut-kbd">↵ Enter</kbd>}
               </button>
               <span>{copy.quotaNotice}</span>
             </div>
@@ -432,7 +481,21 @@ export default function AnalysisPage() {
                     [copy.color, observations.color],
                   ].map(([label, value]) => (
                     <div key={String(label)}>
-                      <dt>{String(label)}</dt>
+                      <dt>
+                        {String(label)}
+                        {OBSERVATION_EXPLANATIONS[String(label)] && (
+                          <span className="tooltip-trigger" style={{ marginLeft: "4px" }}>
+                            <svg fill="none" height="12" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" width="12" style={{ opacity: 0.5, verticalAlign: "middle" }}>
+                              <circle cx="12" cy="12" r="10" />
+                              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                              <line x1="12" x2="12.01" y1="17" y2="17" />
+                            </svg>
+                            <span className="tooltip-card">
+                              {OBSERVATION_EXPLANATIONS[String(label)]}
+                            </span>
+                          </span>
+                        )}
+                      </dt>
                       <dd>{asString(value) ?? zhCN.task11.common.unavailable}</dd>
                     </div>
                   ))}
@@ -497,6 +560,7 @@ export default function AnalysisPage() {
               href={`/processing?source_task_id=${encodeURIComponent(taskId)}`}
             >
               {copy.processAction}
+              <kbd className="shortcut-kbd">P</kbd>
             </Link>
           </div>
         ) : null}

@@ -1,3 +1,7 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import FeatureCard from "../components/FeatureCard";
 import {
@@ -9,12 +13,71 @@ import {
 } from "../components/Icons";
 import MockNotice from "../components/MockNotice";
 import { zhCN } from "../lib/i18n/zh-CN";
+import { fileTransfer } from "../lib/transfer";
 
 export default function HomePage() {
   const { home } = zhCN;
+  const router = useRouter();
+  const [isDragging, setIsDragging] = useState(false);
+
+  useEffect(() => {
+    let dragCounter = 0;
+
+    const handleDragEnter = (e: DragEvent) => {
+      e.preventDefault();
+      dragCounter++;
+      if (e.dataTransfer?.items && e.dataTransfer.items.length > 0) {
+        setIsDragging(true);
+      }
+    };
+
+    const handleDragLeave = (e: DragEvent) => {
+      e.preventDefault();
+      dragCounter--;
+      if (dragCounter === 0) {
+        setIsDragging(false);
+      }
+    };
+
+    const handleDragOver = (e: DragEvent) => {
+      e.preventDefault();
+    };
+
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
+      dragCounter = 0;
+
+      const file = e.dataTransfer?.files?.[0];
+      if (file && /\.(fits|fit|fts)$/i.test(file.name)) {
+        fileTransfer.set(file);
+        router.push("/analysis");
+      }
+    };
+
+    window.addEventListener("dragenter", handleDragEnter);
+    window.addEventListener("dragleave", handleDragLeave);
+    window.addEventListener("dragover", handleDragOver);
+    window.addEventListener("drop", handleDrop);
+
+    return () => {
+      window.removeEventListener("dragenter", handleDragEnter);
+      window.removeEventListener("dragleave", handleDragLeave);
+      window.removeEventListener("dragover", handleDragOver);
+      window.removeEventListener("drop", handleDrop);
+    };
+  }, [router]);
 
   return (
     <>
+      {isDragging && (
+        <div className="drag-overlay">
+          <div className="drag-overlay__content">
+            <UploadIcon size={48} />
+            <p>释放文件以开始 FITS 分析</p>
+          </div>
+        </div>
+      )}
       <main className="home-main">
         <section className="hero">
           <div className="page-shell hero-grid">

@@ -123,6 +123,7 @@ export const zhCN = {
         cancelling: "正在取消",
         cancelled: "已取消",
         completed: "已完成",
+        review_required: "需要质量审查",
         failed: "失败",
         expired: "已过期",
       },
@@ -226,9 +227,18 @@ export const zhCN = {
       styleLegend: "处理风格",
       styleAriaLabel: "处理风格",
       styles: {
-        realistic: { label: "写实", description: "克制拉伸与饱和度" },
-        balanced: { label: "平衡", description: "细节、降噪与色彩均衡" },
-        artistic: { label: "艺术", description: "更强的演示色彩表达" },
+        realistic: {
+          label: "写实",
+          description: "Agent 直接调用专业 Skill，保守处理原始图片",
+        },
+        balanced: {
+          label: "平衡",
+          description: "Kimi 生成风格指导，再由专业 Skill 完成处理",
+        },
+        artistic: {
+          label: "艺术",
+          description: "Kimi 生成美化建议，腾讯混元执行图生图",
+        },
       },
       creating: "正在创建任务…",
       create: "开始 AI 自动出图",

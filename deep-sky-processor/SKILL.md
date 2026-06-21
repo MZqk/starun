@@ -145,7 +145,7 @@ Header/WCS → 原始数值诊断 → 零裁切安全预览
 2. 直接读取原文件运行数值诊断：
 
 ```bash
-python scripts/analyze.py input.fits --format readable
+python scripts/analyze.py input.fits --output analysis-report.json --format json
 ```
 
 3. 为线性 FITS/XISF 生成安全视觉审查包：
@@ -321,7 +321,7 @@ python scripts/enhance_starless.py \
 
 ```bash
 # 1. 诊断（或让 adaptive 自动运行）
-python scripts/analyze.py input.fits --output report.json --format readable
+python scripts/analyze.py input.fits --output report.json --format json
 
 # 2. 使用 adaptive 预设，传入诊断报告和目标信息
 python scripts/pipeline.py input.fits output.jpg \
@@ -506,6 +506,15 @@ python scripts/star_tools.py separate input.jpg starless.tif --legacy
 - `review_required`：产物保留，必须由视觉 Critic 检查或调整后重跑。
 - `failed`：输入、配置或执行失败。
 
+Starun 自动化调用必须把 Pipeline 的 `status`、`quality_gates` 和 `warnings`
+原样写入最终 `processing-result.json` 的 `pipeline_status`、`quality_gates` 和
+`warnings`。不得因为 JSON 字段或 artifact 校验通过而把 `review_required` 改写成
+`success`。
+
+长时间运行的 `analyze.py`、`recognize.py`、`pipeline.py` 和 `quality_metrics.py`
+必须使用 PTY 执行。如果返回 session ID，持续使用空输入轮询，直到进程退出并获得明确
+exit code；不得在进程仍运行时读取其输出文件或启动下一步。
+
 处理完成后，按以下格式输出最终结果：
 
 ```markdown
@@ -562,11 +571,19 @@ final_color + star_reduce + local_enhance + style)
 
 ## 环境
 
-首次安装：
+运行时不得创建虚拟环境或执行 `pip install`。Starun 会通过工作区中的
+`python`/`python3` 命令提供已经安装好 `requirements.txt` 依赖的只读 Python Runtime。
+不得设置或覆盖 `STARUN_SKILL_PYTHON`、`PATH`、`VIRTUAL_ENV`、`PYTHONHOME` 或
+`PYTHONPATH`。若缺少依赖，应直接报告环境配置错误，由 API 镜像或专用 Skill Runtime
+的构建流程修复。
 
-```bash
-/opt/homebrew/bin/python3 -m venv ~/.workbuddy/binaries/python/envs/sys-default
-~/.workbuddy/binaries/python/envs/sys-default/bin/pip install -r requirements.txt
-```
+## Starun 网站处理风格
 
-运行脚本时优先使用已安装依赖的 Python；macOS managed Python 若有签名问题，使用 `/opt/homebrew/bin/python3`。
+读取 `input/request.json` 中的 `style`：
+
+- `realistic`：直接分析并处理图片，采用保守、非生成式流程；不得生成风格提示词，
+  不得调用生图模型。
+- `balanced`：先结合诊断结果生成 `output/style-prompt.json`，再以该提示词指导
+  Skill 的非生成式处理；不得调用生图模型。
+- `artistic`：不由本 Skill 执行。后端 Agent 使用 Kimi 多模态生成美化建议，再调用
+  腾讯混元图生图。

@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 TERMINAL_TASK_STATUSES = {
     TaskStatus.CANCELLED,
     TaskStatus.COMPLETED,
+    TaskStatus.REVIEW_REQUIRED,
     TaskStatus.FAILED,
 }
 UPLOAD_CLEANUP_PLAN_VERSION = 1
