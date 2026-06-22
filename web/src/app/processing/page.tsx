@@ -83,6 +83,7 @@ export default function ProcessingPage() {
   const [fileName, setFileName] = useState<string>(copy.unnamedFile);
   const [sourceTaskId, setSourceTaskId] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const [initialStatus, setInitialStatus] = useState<TaskStatus | null>(null);
   const [creating, setCreating] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -283,6 +284,62 @@ export default function ProcessingPage() {
     }
   }
 
+  const resetToUpload = useCallback(() => {
+    setTaskId(null);
+    setUpload(null);
+    setFileName(copy.unnamedFile);
+    setSourceTaskId(null);
+    setInitialStatus(null);
+    setActionError(null);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("task");
+      url.searchParams.delete("source_task_id");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [copy.unnamedFile]);
+
+  const retryCurrentTask = useCallback(async () => {
+    if (!taskId) return;
+    setRetrying(true);
+    setActionError(null);
+    try {
+      const created = await getApiClient().retryTask(taskId);
+      setInitialStatus(created.status);
+      setTaskId(created.task_id);
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.set("task", created.task_id);
+        window.history.replaceState({}, "", url.toString());
+      }
+      try {
+        await historyRepository.upsert({
+          taskId: created.task_id,
+          type: created.type,
+          fileName,
+          style,
+          lastStatus: created.status,
+          createdAt: created.created_at,
+          expiresAt: created.expires_at,
+          summary: { demo: false },
+          resultAvailable: false,
+        });
+      } catch (caught) {
+        setLocalPersistenceError(
+          caught instanceof Error
+            ? caught.message
+            : zhCN.task11.common.historyPersistenceError,
+        );
+      }
+    } catch (caught) {
+      setActionError(
+        caught instanceof Error ? caught.message : zhCN.task11.history.retryError,
+      );
+    } finally {
+      setRetrying(false);
+    }
+  }, [taskId, fileName, style]);
+
   const agentSteps = useMemo(() => planSteps(events, style), [events, style]);
   const inspection = objectValue(task?.inspection);
   const selectedHdu = objectValue(inspection?.selected_hdu);
@@ -363,6 +420,35 @@ export default function ProcessingPage() {
           onCancel={() => void cancelTask()}
           task={task}
         />
+
+        {((task && task.status === "failed") || (!task && initialStatus === "failed")) && (
+          <div className="recovery-panel">
+            <div className="recovery-header">
+              <span className="recovery-badge">FAULT_RECOVERY_ENGAGED</span>
+              <h3>图像处理任务未成功</h3>
+            </div>
+            <p className="recovery-desc">
+              AI 自动出图任务执行未成功。此任务对应的处理算力节点可能暂时离线或生成超时。您可以重新上传文件、携带原分析结果，或者点击重试当前处理任务。
+            </p>
+            <div className="recovery-actions">
+              <button
+                className="button button--secondary"
+                onClick={resetToUpload}
+                type="button"
+              >
+                重新上传文件
+              </button>
+              <button
+                className="button button--primary"
+                disabled={retrying}
+                onClick={() => void retryCurrentTask()}
+                type="button"
+              >
+                {retrying ? "正在重新排队..." : "重试出图任务"}
+              </button>
+            </div>
+          </div>
+        )}
         {loading && !task ? <p className="empty-copy">{copy.restoring}</p> : null}
         {actionError ? (
           <p className="form-error" role="alert">

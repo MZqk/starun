@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-MAX_ARTIFACT_BYTES = 10 * 1024 * 1024
+MAX_ARTIFACT_BYTES = 30 * 1024 * 1024
 type MediaType = Literal["application/json", "image/jpeg", "image/png", "image/tiff"]
 MEDIA_TYPES: dict[str, MediaType] = {
     ".json": "application/json",

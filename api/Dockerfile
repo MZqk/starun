@@ -8,7 +8,8 @@ ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
 ENV PATH="/app/.venv/bin:$PATH"
 
 COPY api/pyproject.toml api/uv.lock ./
-RUN uv sync --no-dev
+RUN uv sync --no-dev \
+    && .venv/bin/python -c "import numpy, astropy, scipy, PIL, tifffile, xisf"
 
 COPY api/alembic.ini ./
 COPY api/alembic ./alembic

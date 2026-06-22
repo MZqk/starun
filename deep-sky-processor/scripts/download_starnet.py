@@ -74,8 +74,7 @@ def download_starnet():
     os.makedirs(target_dir, exist_ok=True)
     
     # 检查是否已经存在核心的可执行文件，防止重复下载
-    exe_name = "starnet++"
-    if os.path.isfile(os.path.join(target_dir, exe_name)):
+    if os.path.isfile(os.path.join(target_dir, "starnet++")) or os.path.isfile(os.path.join(target_dir, "starnet2")):
         print(f"[*] StarNet2 核心可执行文件已存在于 {target_dir}，跳过下载。")
         return
 

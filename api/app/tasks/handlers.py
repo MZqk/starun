@@ -300,7 +300,7 @@ def _task_handler_error(error: Exception) -> TaskHandlerError:
     if isinstance(error, AgentGuardrailError):
         return TaskHandlerError("agent_guardrail", "Agent output was rejected.", False)
     if isinstance(error, SkillExecutionError):
-        return TaskHandlerError("skill_execution_failed", str(error), error.retryable)
+        return TaskHandlerError(error.code, str(error), error.retryable)
     if isinstance(error, SkillOutputError):
         return TaskHandlerError("skill_output_invalid", str(error), False)
     raise TypeError(f"unsupported Agent SDK error: {type(error).__name__}")

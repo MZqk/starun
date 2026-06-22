@@ -22,6 +22,7 @@ from app.agent_sdk.contracts import (
     AnalysisSkillResult,
     ProcessingSkillResult,
     PublishedSkillRun,
+    SkillFailureResult,
     SkillRequest,
 )
 from app.agent_sdk.errors import (
@@ -191,11 +192,13 @@ class AgentSdkBridge:
             try:
                 await task
             except (MaxTurnsExceeded, ModelBehaviorError) as exc:
+                logger.exception(f"Agent run failed or was rejected by model adapter: {exc}")
                 raise AgentGuardrailError("Agent run was rejected.") from exc
             except (
                 InputGuardrailTripwireTriggered,
                 OutputGuardrailTripwireTriggered,
             ) as exc:
+                logger.exception(f"Agent run triggered sandbox guardrail tripwire: {exc}")
                 raise AgentGuardrailError("Agent guardrail rejected the run.") from exc
             except (APITimeoutError, APIConnectionError, RateLimitError) as exc:
                 raise AgentProviderError(str(exc), retryable=True) from exc
@@ -480,10 +483,26 @@ class AgentSdkBridge:
         try:
             raw = await runtime.read_bytes(spec.result_path)
         except FileNotFoundError as exc:
-            raise SkillExecutionError("Skill did not write its result file.") from exc
+            raise SkillExecutionError(
+                "Skill did not write its result file.",
+                code="skill_output_missing",
+            ) from exc
         if len(raw) > 64 * 1024:
             raise SkillOutputError("Skill result exceeds 64 KiB.")
         try:
+            decoded = json.loads(raw)
+            if isinstance(decoded, dict) and decoded.get("status") == "failed":
+                failure = SkillFailureResult.model_validate(decoded, strict=True)
+                missing = (
+                    f" Missing dependencies: {', '.join(failure.missing_dependencies)}."
+                    if failure.missing_dependencies
+                    else ""
+                )
+                raise SkillExecutionError(
+                    f"{failure.error_code}: {failure.message}.{missing}",
+                    retryable=failure.retryable,
+                    code=failure.error_code,
+                )
             if spec.task_type is TaskType.ANALYSIS:
                 result = AnalysisSkillResult.model_validate_json(raw, strict=True)
                 artifacts = await publish_claimed_artifacts(

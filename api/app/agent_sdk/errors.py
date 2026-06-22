@@ -17,9 +17,16 @@ class AgentGuardrailError(AgentSdkError):
 
 
 class SkillExecutionError(AgentSdkError):
-    def __init__(self, message: str, *, retryable: bool = False) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        code: str = "skill_execution_failed",
+    ) -> None:
         super().__init__(message)
         self.retryable = retryable
+        self.code = code
 
 
 class SkillOutputError(AgentSdkError):

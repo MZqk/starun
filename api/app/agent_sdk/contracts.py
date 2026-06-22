@@ -62,6 +62,7 @@ class AnalysisSkillResult(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal["starun.skill-result/v1"]
+    status: Literal["success"]
     provider: str = Field(min_length=1, max_length=120)
     model: str = Field(min_length=1, max_length=200)
     preview: AnalysisPreview
@@ -82,6 +83,7 @@ class ProcessingSkillResult(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal["starun.skill-result/v1"]
+    status: Literal["success"]
     provider: str = Field(min_length=1, max_length=120)
     model: str = Field(min_length=1, max_length=200)
     style: ProcessingStyle
@@ -112,6 +114,22 @@ class ProcessingSkillResult(BaseModel):
         if self.style is ProcessingStyle.BALANCED and "style-prompt.json" not in names:
             raise ValueError("balanced processing must declare style-prompt.json")
         return self
+
+
+class SkillFailureResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schema_version: Literal["starun.skill-result/v1"]
+    status: Literal["failed"]
+    error_code: Literal[
+        "runtime_dependency_missing",
+        "skill_command_failed",
+        "skill_output_missing",
+        "skill_output_invalid",
+    ]
+    message: str = Field(min_length=1, max_length=1000)
+    retryable: bool = False
+    missing_dependencies: list[str] = Field(default_factory=list, max_length=32)
 
 
 class PublishedSkillRun(BaseModel):

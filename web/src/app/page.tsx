@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import FeatureCard from "../components/FeatureCard";
@@ -19,6 +19,26 @@ export default function HomePage() {
   const { home } = zhCN;
   const router = useRouter();
   const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && /\.(fits|fit|fts)$/i.test(file.name)) {
+      fileTransfer.set(file);
+      router.push("/analysis");
+    }
+  };
+
+  const handleUploadCardClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleUploadCardKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      fileInputRef.current?.click();
+    }
+  };
 
   useEffect(() => {
     let dragCounter = 0;
@@ -55,16 +75,25 @@ export default function HomePage() {
       }
     };
 
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsDragging(false);
+        dragCounter = 0;
+      }
+    };
+
     window.addEventListener("dragenter", handleDragEnter);
     window.addEventListener("dragleave", handleDragLeave);
     window.addEventListener("dragover", handleDragOver);
     window.addEventListener("drop", handleDrop);
+    window.addEventListener("keydown", handleKeyDown);
 
     return () => {
       window.removeEventListener("dragenter", handleDragEnter);
       window.removeEventListener("dragleave", handleDragLeave);
       window.removeEventListener("dragover", handleDragOver);
       window.removeEventListener("drop", handleDrop);
+      window.removeEventListener("keydown", handleKeyDown);
     };
   }, [router]);
 
@@ -98,7 +127,21 @@ export default function HomePage() {
               </div>
             </div>
 
-            <aside className="upload-signal" aria-label={home.uploadSignal.title}>
+            <aside
+              className="upload-signal"
+              aria-label={home.uploadSignal.title}
+              role="button"
+              tabIndex={0}
+              onClick={handleUploadCardClick}
+              onKeyDown={handleUploadCardKeyDown}
+            >
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                accept=".fits,.fit,.fts"
+                style={{ display: "none" }}
+              />
               <div className="upload-signal__orb" aria-hidden="true">
                 <UploadIcon size={25} />
               </div>
@@ -116,6 +159,10 @@ export default function HomePage() {
               </dl>
               <span className="upload-scope">{home.uploadSignal.scope}</span>
               <p className="upload-quota">{home.uploadSignal.quota}</p>
+              <div className="upload-diagnostic-bar" aria-hidden="true">
+                <span className="diagnostic-line"></span>
+                <span className="diagnostic-text">READY_TO_PARSE_HDU</span>
+              </div>
             </aside>
           </div>
         </section>
@@ -178,26 +225,49 @@ export default function HomePage() {
               <h2>{home.steps.heading}</h2>
             </div>
             <ol className="steps-list">
-              {home.steps.items.map((step, index) => (
-                <li key={step.title}>
-                  <span className="step-number">{index + 1}</span>
-                  <div>
-                    <h3>{step.title}</h3>
-                    <p>{step.description}</p>
-                  </div>
-                </li>
-              ))}
+              {home.steps.items.map((step, index) => {
+                const stepMetaCodes = [
+                  "INPUT: FITS_RAW_DATA | VERIFY: HDU_STRUCTURE",
+                  "METHOD: AI_DEEP_ADVISOR | ENGINE: KIMI_INTELLIGENT",
+                  "OUTPUT: L1_CALIBRATED_REPORT | ARTIFACT_PNG_TIFF"
+                ];
+                return (
+                  <li key={step.title}>
+                    <div className="step-badge">
+                      <span className="step-number">{String(index + 1).padStart(2, '0')}</span>
+                      <span className="step-code">SYS_STEP_0{index + 1}</span>
+                    </div>
+                    <div className="step-content">
+                      <h3>{step.title}</h3>
+                      <p>{step.description}</p>
+                      <div className="step-meta" aria-hidden="true">
+                        <code>{stepMetaCodes[index]}</code>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
             </ol>
           </div>
         </section>
 
         <section className="privacy-section">
           <div className="page-shell privacy-layout">
-            <div>
+            <div className="privacy-card">
+              <div className="sandbox-badge" aria-hidden="true">
+                <span className="sandbox-badge__dot"></span>
+                <span className="sandbox-badge__text">LOCAL_SANDBOX_ACTIVE // NO_USER_DATA_LOGGED</span>
+              </div>
               <h2>{home.privacy.heading}</h2>
               <p>{home.privacy.body}</p>
             </div>
-            <p className="resource-note">{home.privacy.resource}</p>
+            <div className="resource-panel-minimal">
+              <div className="resource-header">
+                <span className="resource-header__title">HARDWARE_CONSTRAINTS</span>
+                <span className="resource-header__status">CPU_LIMITED</span>
+              </div>
+              <p className="resource-note">{home.privacy.resource}</p>
+            </div>
           </div>
         </section>
       </main>

@@ -54,12 +54,19 @@ const OBSERVATION_EXPLANATIONS: Record<string, string> = {
   "色彩": "通过恒星色彩校准 (PCC) 指标，分析红绿蓝通道的平衡及发射星云的色彩表现。"
 };
 
+function renderConfidenceGauge(confidence: number): string {
+  const filledCount = Math.round(confidence * 10);
+  const emptyCount = 10 - filledCount;
+  return `${Math.round(confidence * 100)}% [${"▰".repeat(filledCount)}${"▱".repeat(emptyCount)}]`;
+}
+
 export default function AnalysisPage() {
   const copy = zhCN.task11.analysis;
   const [initialFile, setInitialFile] = useState<File | null>(null);
   const [upload, setUpload] = useState<UploadResponse | null>(null);
   const [fileName, setFileName] = useState<string>(copy.unnamedFile);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
     const transferFile = fileTransfer.get();
@@ -192,6 +199,60 @@ export default function AnalysisPage() {
     }
   }
 
+  const resetToUpload = useCallback(() => {
+    setTaskId(null);
+    setUpload(null);
+    setInitialFile(null);
+    setInitialStatus(null);
+    setActionError(null);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("task");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, []);
+
+  const retryCurrentTask = useCallback(async () => {
+    if (!taskId) return;
+    setRetrying(true);
+    setActionError(null);
+    try {
+      const created = await getApiClient().retryTask(taskId);
+      setInitialStatus(created.status);
+      setTaskId(created.task_id);
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.set("task", created.task_id);
+        window.history.replaceState({}, "", url.toString());
+      }
+      try {
+        await historyRepository.upsert({
+          taskId: created.task_id,
+          type: created.type,
+          fileName,
+          style: created.style,
+          lastStatus: created.status,
+          createdAt: created.created_at,
+          expiresAt: created.expires_at,
+          summary: null,
+          resultAvailable: false,
+        });
+      } catch (caught) {
+        setLocalPersistenceError(
+          caught instanceof Error
+            ? caught.message
+            : zhCN.task11.common.historyPersistenceError,
+        );
+      }
+    } catch (caught) {
+      setActionError(
+        caught instanceof Error ? caught.message : zhCN.task11.history.retryError,
+      );
+    } finally {
+      setRetrying(false);
+    }
+  }, [taskId, fileName]);
+
   const inspection = useMemo(() => {
     if (upload) return upload.inspection;
     return task?.inspection as unknown as FitsInspection | null;
@@ -306,6 +367,35 @@ export default function AnalysisPage() {
           onCancel={() => void cancelTask()}
           task={task}
         />
+
+        {((task && task.status === "failed") || (!task && initialStatus === "failed")) && (
+          <div className="recovery-panel">
+            <div className="recovery-header">
+              <span className="recovery-badge">FAULT_RECOVERY_ENGAGED</span>
+              <h3>分析任务执行未成功</h3>
+            </div>
+            <p className="recovery-desc">
+              线性 FITS 文件统计或 AI 解读未能在算力节点中完成解析。此文件可能包含非标准或损坏的 HDU 数据，或者服务端连接已超时。您可以重新上传文件，或重试该任务以再次启动分析。
+            </p>
+            <div className="recovery-actions">
+              <button
+                className="button button--secondary"
+                onClick={resetToUpload}
+                type="button"
+              >
+                重新上传 FITS
+              </button>
+              <button
+                className="button button--primary"
+                disabled={retrying}
+                onClick={() => void retryCurrentTask()}
+                type="button"
+              >
+                {retrying ? "正在重新排队..." : "重试分析任务"}
+              </button>
+            </div>
+          </div>
+        )}
         {loading && !task ? <p className="empty-copy">{copy.restoring}</p> : null}
         {actionError ? (
           <p className="form-error" role="alert">
@@ -453,13 +543,17 @@ export default function AnalysisPage() {
                   <dl className="analysis-quality">
                     <div>
                       <dt>{copy.qualityRating}</dt>
-                      <dd>{copy.qualityLabels[asString(imageQuality.rating) ?? "fair"] ?? asString(imageQuality.rating)}</dd>
+                      <dd style={{ marginTop: "0.4rem" }}>
+                        <span className={`rating-tag rating-tag--${asString(imageQuality.rating) ?? "fair"}`}>
+                          {copy.qualityLabels[asString(imageQuality.rating) ?? "fair"] ?? asString(imageQuality.rating)}
+                        </span>
+                      </dd>
                     </div>
                     <div>
                       <dt>{copy.confidence}</dt>
-                      <dd>
+                      <dd style={{ fontFamily: "var(--type-mono)", fontSize: "0.82rem", letterSpacing: "-0.01em", marginTop: "0.42rem" }}>
                         {typeof imageQuality.confidence === "number"
-                          ? `${Math.round(imageQuality.confidence * 100)}%`
+                          ? renderConfidenceGauge(imageQuality.confidence)
                           : zhCN.task11.common.unavailable}
                       </dd>
                     </div>

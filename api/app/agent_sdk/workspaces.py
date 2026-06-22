@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import sys
 from dataclasses import dataclass
@@ -12,13 +13,15 @@ from agents.sandbox.entries import File, LocalDir
 from agents.sandbox.manifest import Environment
 from agents.sandbox.types import Permissions
 from agents.sandbox.workspace_paths import SandboxPathGrant
+from pydantic import TypeAdapter
 
 from app.agent_sdk.contracts import (
     AnalysisSkillResult,
     ProcessingSkillResult,
+    SkillFailureResult,
     SkillRequest,
 )
-from app.agent_sdk.errors import AgentNotConfiguredError
+from app.agent_sdk.errors import AgentNotConfiguredError, SkillExecutionError
 from app.fits.schemas import FitsInspection
 
 
@@ -26,6 +29,16 @@ from app.fits.schemas import FitsInspection
 class SkillDefinition:
     name: str
     path: Path
+
+
+REQUIRED_SKILL_RUNTIME_MODULES = (
+    "numpy",
+    "astropy",
+    "scipy",
+    "PIL",
+    "tifffile",
+    "xisf",
+)
 
 
 class StarunExecCommandTool(ExecCommandTool):
@@ -45,9 +58,20 @@ def build_task_manifest(
 ) -> Manifest:
     if not source_path.is_file():
         raise AgentNotConfiguredError("Task source file is missing.")
+    missing_dependencies = [
+        module
+        for module in REQUIRED_SKILL_RUNTIME_MODULES
+        if importlib.util.find_spec(module) is None
+    ]
+    if missing_dependencies:
+        raise SkillExecutionError(
+            "Starun skill runtime dependencies are missing: "
+            + ", ".join(missing_dependencies),
+            code="runtime_dependency_missing",
+        )
     workspace_id = sha256(request.task_id.encode("utf-8")).hexdigest()
     workspace_root = f"/tmp/starun-sandbox/{workspace_id}"
-    runtime_python = str(Path(sys.executable).resolve())
+    runtime_python = str(Path(sys.executable).absolute())
     python_wrapper = (
         "#!/bin/sh\n"
         "unset VIRTUAL_ENV PYTHONHOME PYTHONPATH __PYVENV_LAUNCHER__ "
@@ -59,12 +83,12 @@ def build_task_manifest(
         str(Path(sys.prefix).resolve()),
         str(Path(sys.base_prefix).resolve()),
     }
-    result_model = (
-        AnalysisSkillResult
+    result_type = (
+        AnalysisSkillResult | SkillFailureResult
         if request.task_type.value == "analysis"
-        else ProcessingSkillResult
+        else ProcessingSkillResult | SkillFailureResult
     )
-    result_schema = result_model.model_json_schema()
+    result_schema = TypeAdapter(result_type).json_schema()
     return Manifest(
         root=workspace_root,
         environment=Environment(

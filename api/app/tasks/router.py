@@ -82,6 +82,10 @@ DETAILED_TASK_ERROR_CODES = {
     "image_provider_invalid_response",
     "image_provider_missing_image",
     "image_provider_unreachable",
+    "runtime_dependency_missing",
+    "skill_command_failed",
+    "skill_output_missing",
+    "skill_output_invalid",
 }
 WINDOWS_DRIVE_PATH = re.compile(r"^[A-Za-z]:[\\/]")
 TRAVERSAL_PATH = re.compile(r"(^|[\\/])\.\.([\\/]|$)")
