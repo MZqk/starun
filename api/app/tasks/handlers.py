@@ -174,9 +174,10 @@ class ProcessingTaskHandler:
         if task.style is None:
             raise ValueError("processing style is missing")
         task_dir = self._settings.data_root / "tasks" / task_id
-        source_path = task_dir / "source.fits"
         if task.input_path is None:
             raise ValueError("task input path is missing")
+        source_suffix = Path(task.input_path).suffix.lower()
+        source_path = task_dir / f"source{source_suffix}"
         data_root_fd = open_directory_fd(self._settings.data_root, create=True)
         try:
             task_dir_fd = open_relative_directory_fd(

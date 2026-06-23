@@ -31,6 +31,7 @@ export default function FeatureCard({
 }: FeatureCardProps) {
   return (
     <article className={`feature-card feature-card--${variant}`}>
+      <div className="border-mask" aria-hidden="true" />
       <div className="feature-card__decoration">
         <span className="feature-card__icon">{icon}</span>
         <span className="feature-card__line" />

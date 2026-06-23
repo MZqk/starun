@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import numpy.typing as npt
 from astropy.io import fits
+from xisf import XISF
 
 
 Array = npt.NDArray[np.generic]
@@ -39,6 +40,33 @@ def make_table_only_fits(tmp_path: Path) -> Path:
 def make_corrupt_fits(tmp_path: Path) -> Path:
     path = tmp_path / "corrupt.fits"
     path.write_bytes(b"this is not a FITS file")
+    return path
+
+
+def make_xisf(
+    tmp_path: Path,
+    data: Array,
+    *,
+    name: str = "image.xisf",
+) -> Path:
+    path = tmp_path / name
+    image = data[..., np.newaxis] if data.ndim == 2 else data
+    XISF.write(
+        str(path),
+        image,
+        image_metadata={
+            "FITSKeywords": {
+                "OBJECT": [{"value": "M42", "comment": "Target"}],
+                "FILTER": [{"value": "L", "comment": "Filter"}],
+            }
+        },
+    )
+    return path
+
+
+def make_corrupt_xisf(tmp_path: Path) -> Path:
+    path = tmp_path / "corrupt.xisf"
+    path.write_bytes(b"this is not an XISF file")
     return path
 
 

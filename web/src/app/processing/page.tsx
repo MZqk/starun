@@ -231,7 +231,7 @@ export default function ProcessingPage() {
     setActionError(null);
   }, []);
 
-  async function createTask() {
+  const createTask = useCallback(async () => {
     if (!upload && !sourceTaskId) return;
     setCreating(true);
     setActionError(null);
@@ -272,7 +272,7 @@ export default function ProcessingPage() {
     } finally {
       setCreating(false);
     }
-  }
+  }, [upload, sourceTaskId, style, fileName, copy.createError]);
 
   async function cancelTask() {
     if (!taskId) return;
@@ -287,6 +287,36 @@ export default function ProcessingPage() {
       setCancelling(false);
     }
   }
+
+  useEffect(() => {
+    if (taskId) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const active = document.activeElement?.tagName;
+      if (active === "INPUT" || active === "TEXTAREA" || active === "SELECT") {
+        return;
+      }
+
+      if (e.key === "1") {
+        setStyle("realistic");
+      } else if (e.key === "2") {
+        setStyle("balanced");
+      } else if (e.key === "3") {
+        setStyle("artistic");
+      } else if (e.key === "Enter") {
+        const canSubmit = (upload || sourceTaskId) && !creating;
+        if (canSubmit) {
+          e.preventDefault();
+          void createTask();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [taskId, upload, sourceTaskId, creating, createTask]);
 
   const resetToUpload = useCallback(() => {
     setTaskId(null);
@@ -375,6 +405,7 @@ export default function ProcessingPage() {
           <>
             {sourceTaskId ? (
               <section className="source-task-card">
+                <div className="border-mask" aria-hidden="true" />
                 <span className="section-kicker">{copy.sourceKicker}</span>
                 <h2>{sourceTaskId}</h2>
                 <p>{copy.sourceDescription}</p>
@@ -396,7 +427,12 @@ export default function ProcessingPage() {
                       value={value}
                     />
                     <span>
-                      <strong>{copy.styles[value].label}</strong>
+                      <strong>
+                        {copy.styles[value].label}
+                        <kbd className="style-shortcut-kbd" aria-hidden="true">
+                          {value === "realistic" ? "1" : value === "balanced" ? "2" : "3"}
+                        </kbd>
+                      </strong>
                       <small>{copy.styles[value].description}</small>
                     </span>
                   </label>
@@ -412,6 +448,11 @@ export default function ProcessingPage() {
                 type="button"
               >
                 {creating ? copy.creating : copy.create}
+                {!creating && (upload || sourceTaskId) && (
+                  <kbd aria-hidden="true" className="shortcut-kbd">
+                    ↵ Enter
+                  </kbd>
+                )}
               </button>
               <span>{copy.styleNotice}</span>
             </div>
@@ -427,6 +468,7 @@ export default function ProcessingPage() {
 
         {((task && task.status === "failed") || (!task && initialStatus === "failed")) && (
           <div className="recovery-panel">
+            <div className="border-mask" aria-hidden="true" />
             <div className="recovery-header">
               <span className="recovery-badge">FAULT_RECOVERY_ENGAGED</span>
               <h3>图像处理任务未成功</h3>
@@ -477,6 +519,7 @@ export default function ProcessingPage() {
 
         {taskId ? (
           <section aria-label={copy.planAriaLabel} className="agent-plan">
+            <div className="border-mask" aria-hidden="true" />
             <div className="panel-heading">
               <div>
                 <span className="section-kicker">{copy.planLabel}</span>
@@ -505,6 +548,7 @@ export default function ProcessingPage() {
           <>
             <section className="comparison-panel" aria-label={copy.comparisonAriaLabel}>
               <div className="comparison-frame comparison-frame--before">
+                <div className="border-mask" aria-hidden="true" />
                 <span>{copy.before}</span>
                 {activeImages?.referenceUrl ? (
                   <div
@@ -530,6 +574,7 @@ export default function ProcessingPage() {
                 </small>
               </div>
               <div className="comparison-frame comparison-frame--after">
+                <div className="border-mask" aria-hidden="true" />
                 <span className="section-kicker">{copy.previewLabel}</span>
                 {activeImages?.resultUrl ? (
                   <div
@@ -549,6 +594,7 @@ export default function ProcessingPage() {
             </section>
             {artDirectionSummary ? (
               <section className="source-task-card">
+                <div className="border-mask" aria-hidden="true" />
                 <span className="section-kicker">{copy.directionKicker}</span>
                 <h2>{copy.directionTitle}</h2>
                 <p>{artDirectionSummary}</p>
@@ -564,6 +610,7 @@ export default function ProcessingPage() {
         ) : null}
         {resultExpired ? (
           <section className="empty-state" role="status">
+            <div className="border-mask" aria-hidden="true" />
             <h2>{copy.expiredTitle}</h2>
             <p>{copy.resultUnavailable}</p>
           </section>

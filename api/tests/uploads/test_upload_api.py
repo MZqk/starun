@@ -29,8 +29,10 @@ from app.uploads.service import (
 from app.main import app
 from tests.fixtures.fits_factory import (
     make_corrupt_fits,
+    make_corrupt_xisf,
     make_fits,
     make_table_only_fits,
+    make_xisf,
 )
 
 DiskUsage = namedtuple("DiskUsage", "total used free")
@@ -164,11 +166,33 @@ def test_valid_fits_is_streamed_inspected_and_persisted_ready(
     assert_no_usage_or_tasks(db_session)
 
 
+def test_valid_xisf_is_streamed_inspected_and_persisted_ready(
+    client: TestClient,
+    headers: dict[str, str],
+    db_session: Session,
+    data_root: Path,
+    tmp_path: Path,
+) -> None:
+    source = make_xisf(tmp_path, np.ones((8, 12), dtype=np.float32))
+
+    response = upload(client, source, headers=headers)
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["inspection"]["format"] == "xisf"
+    assert body["inspection"]["selected_hdu"]["kind"] == "xisf_image"
+    row = db_session.get(Upload, body["upload_id"])
+    assert row is not None
+    assert Path(row.stored_path).suffix == ".xisf"
+    assert Path(row.stored_path).is_file()
+
+
 @pytest.mark.parametrize(
     ("factory", "error_code"),
     [
         (make_table_only_fits, "unsupported_fits_data"),
         (make_corrupt_fits, "invalid_fits"),
+        (make_corrupt_xisf, "invalid_xisf"),
     ],
 )
 def test_invalid_fits_returns_422_retains_audit_and_removes_files(

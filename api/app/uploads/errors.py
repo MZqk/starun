@@ -37,7 +37,7 @@ def unsupported_extension_error() -> UploadError:
     return UploadError(
         415,
         "unsupported_file_extension",
-        "Only .fits, .fit, and .fts files are supported.",
+        "Only .fits, .fit, .fts, and .xisf files are supported.",
     )
 
 

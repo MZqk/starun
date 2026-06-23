@@ -55,7 +55,7 @@ describe("home page", () => {
     render(<HomePage />);
 
     const signalPanel = screen.getByRole("button", {
-      name: "从一张线性 FITS 开始",
+      name: "从一张线性天文图像开始",
     });
 
     expect(signalPanel).toHaveAttribute("tabindex", "0");
@@ -162,7 +162,7 @@ describe("navigation", () => {
     expect(
       within(navigation).getByRole("link", { name: "历史记录" }),
     ).toHaveAttribute("href", "/history");
-    expect(screen.getByRole("link", { name: "上传 FITS" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "上传 FITS/XISF" })).toHaveAttribute(
       "href",
       "/analysis",
     );

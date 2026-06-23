@@ -77,6 +77,7 @@ export default function TaskStatusPanel({
 
   return (
     <section className="task-status-panel">
+      <div className="border-mask" aria-hidden="true" />
       <div>
         <span className={`status-dot status-dot--${status}`} aria-hidden="true" />
         <div aria-atomic="true" aria-live="polite">

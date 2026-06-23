@@ -8,7 +8,11 @@ from app.agent_sdk.errors import AgentNotConfiguredError
 from app.config import AgentProtocol, Settings
 
 
-def build_agent_model(settings: Settings) -> Model:
+def build_agent_model(
+    settings: Settings,
+    *,
+    timeout_seconds: float | None = None,
+) -> Model:
     if settings.ai_api_key is None:
         raise AgentNotConfiguredError("Agent provider API key is not configured.")
     api_key = settings.ai_api_key.get_secret_value().strip()
@@ -19,7 +23,7 @@ def build_agent_model(settings: Settings) -> Model:
     client = AsyncOpenAI(
         api_key=api_key,
         base_url=settings.ai_base_url.rstrip("/") + "/",
-        timeout=settings.ai_timeout_seconds,
+        timeout=timeout_seconds or settings.ai_timeout_seconds,
         max_retries=0,
     )
     if settings.agent_protocol is AgentProtocol.RESPONSES:

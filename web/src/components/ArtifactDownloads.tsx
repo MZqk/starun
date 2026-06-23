@@ -57,6 +57,7 @@ export default function ArtifactDownloads({
 
   return (
     <section className="artifact-downloads" aria-labelledby="downloads-title">
+      <div className="border-mask" aria-hidden="true" />
       <div>
         <span className="section-kicker">{label ?? copy.label}</span>
         <h2 id="downloads-title">{copy.title}</h2>

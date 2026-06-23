@@ -3,7 +3,7 @@ from typing import ClassVar
 from pydantic import BaseModel, ConfigDict
 
 from app.agent.contracts import TaskContext, ToolResult
-from app.analysis import render_fits_preview
+from app.analysis import render_image_preview
 from app.artifacts.contracts import JsonValue
 from app.artifacts.store import ArtifactStore
 from app.config import Settings
@@ -31,7 +31,7 @@ class PrepareReferenceTool:
         del arguments
         if context.fits_inspection is None:
             raise ValueError("FITS inspection is required for processing")
-        preview = render_fits_preview(
+        preview = render_image_preview(
             context.source_path,
             context.fits_inspection.selected_hdu.index,
             max_edge=self._settings.image_ai_max_edge,

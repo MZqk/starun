@@ -203,7 +203,7 @@ describe("Task 11 flows", () => {
     });
 
     render(<AnalysisPage />);
-    const input = screen.getByLabelText("选择 FITS 文件");
+    const input = screen.getByLabelText("选择 FITS/XISF 文件");
     await user.upload(input, new File(["fits"], "m42.fits"));
 
     expect((await screen.findAllByText("HDU 0")).length).toBeGreaterThan(0);

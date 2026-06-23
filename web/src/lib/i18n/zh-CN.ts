@@ -8,24 +8,24 @@ export const zhCN = {
       titleEmphasis: "专业判断",
       fullTitle: "让每一帧深空数据，得到专业判断",
       description:
-        "为有经验的天文摄影爱好者解析已校准、已叠加的线性 FITS，获得专业后期建议，或交给 Agent 自动生成艺术增强成片。",
+        "为有经验的天文摄影爱好者解析已校准、已叠加的线性 FITS 或 XISF，获得专业后期建议，或交给 Agent 自动生成艺术增强成片。",
       analysisCta: "开始分析",
       processingCta: "自动出图",
     },
     uploadSignal: {
-      title: "从一张线性 FITS 开始",
-      description: "上传后扫描 HDU，选择可处理的最大图像。",
-      action: "选择 FITS 并开始分析",
+      title: "从一张线性天文图像开始",
+      description: "上传后解析 FITS HDU 或 XISF 图像，选择可处理的最大图像。",
+      action: "选择文件并开始分析",
       formatLabel: "格式",
-      formatValue: ".fits / .fit / .fts",
+      formatValue: ".fits / .fit / .fts / .xisf",
       sizeLabel: "上限",
       sizeValue: "≤ 500 MB",
-      scope: "仅支持 FITS",
+      scope: "支持 FITS / XISF",
       quota: "每日最多 5 次任务，分析与自动出图共享",
     },
     mockNotice: {
       title: "当前能力边界",
-      body: "当前首版聚焦 FITS：程序提取元数据、基础统计和参考预览，AI 负责专业解读、艺术指导与参考图约束下的自动出图。",
+      body: "当前支持 FITS 与 XISF：程序提取元数据、基础统计和参考预览，AI 负责专业解读、艺术指导与参考图约束下的自动出图。",
     },
     features: {
       ariaLabel: "核心能力",
@@ -35,9 +35,9 @@ export const zhCN = {
       analysis: {
         title: "专业分析",
         description:
-          "查看 FITS 头、HDU、尺寸、位深与基础统计，并获得分步骤的专业解读、处理方案和推荐参数。",
+          "查看 FITS/XISF 元数据、图像尺寸、位深与基础统计，并获得分步骤的专业解读、处理方案和推荐参数。",
         link: "查看专业分析",
-        tags: ["FITS 解析", "处理建议", "参数报告"],
+        tags: ["FITS/XISF 解析", "处理建议", "参数报告"],
       },
       processing: {
         title: "AI 自动出图",
@@ -59,8 +59,8 @@ export const zhCN = {
       heading: "三步完成一次后期决策",
       items: [
         {
-          title: "上传线性 FITS",
-          description: "选择合法且不超过 500 MB 的 .fits、.fit 或 .fts 文件。",
+          title: "上传线性 FITS/XISF",
+          description: "选择合法且不超过 500 MB 的 .fits、.fit、.fts 或 .xisf 文件。",
         },
         {
           title: "检查报告或选择风格",
@@ -76,7 +76,7 @@ export const zhCN = {
       heading: "数据保留与资源边界",
       body: "上传文件与服务端产物将在 24 小时后删除。本地历史只保存任务摘要；服务端文件过期后，历史记录仍可能存在，但结果不可继续下载。",
       resource:
-        "首个里程碑运行在有限 CPU、内存和磁盘资源上，不承诺对所有合法 FITS 结构或 500 MB 文件都能完成处理。",
+        "服务运行在有限 CPU、内存和磁盘资源上，不承诺对所有合法 FITS/XISF 结构或 500 MB 文件都能完成处理。",
     },
   },
   task11: {
@@ -91,10 +91,10 @@ export const zhCN = {
         `任务状态仍会继续更新，但本地历史写入失败：${message}`,
     },
     upload: {
-      title: "上传 FITS 文件",
+      title: "上传 FITS/XISF 文件",
       description:
-        "拖放文件到这里，或使用文件选择器。支持 .fits、.fit、.fts，最大 500 MB。",
-      inputLabel: "选择 FITS 文件",
+        "拖放文件到这里，或使用文件选择器。支持 .fits、.fit、.fts、.xisf，最大 500 MB。",
+      inputLabel: "选择 FITS/XISF 文件",
       choose: "选择文件",
       refreshNotice: "刷新页面会中断上传，请保持当前页面打开。",
       quotaNotice: "上传与校验不计入任务额度，创建任务前不会扣除额度。",
@@ -105,11 +105,11 @@ export const zhCN = {
       cancelled: "上传已取消。",
       networkError: "网络连接中断，上传未完成。",
       genericError: "上传失败，请稍后重试。",
-      extensionError: "请选择 .fits、.fit 或 .fts 文件。",
+      extensionError: "请选择 .fits、.fit、.fts 或 .xisf 文件。",
       sizeError: "文件超过 500 MB，未开始上传。",
       validationAriaLabel: "服务器校验结果",
-      validationKicker: "真实 FITS 校验",
-      validationCount: (count: number) => `服务器已读取 ${count} 个 HDU`,
+      validationKicker: "真实天文图像校验",
+      validationCount: (count: number) => `服务器已读取 ${count} 个图像单元`,
       selected: "选中",
       name: "名称",
       shape: "尺寸",

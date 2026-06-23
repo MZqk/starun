@@ -12,7 +12,7 @@ import { zhCN } from "../lib/i18n/zh-CN";
 import { UploadIcon } from "./Icons";
 
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
-const ACCEPTED_EXTENSION = /\.(fits|fit|fts)$/i;
+const ACCEPTED_EXTENSION = /\.(fits|fit|fts|xisf)$/i;
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -193,6 +193,7 @@ export default function UploadZone({
 
   return (
     <section className="upload-zone-wrap" aria-labelledby="upload-zone-title">
+      <div className="border-mask" aria-hidden="true" />
       <div
         className={dragging ? "upload-zone is-dragging" : "upload-zone"}
         onDragEnter={(event) => {
@@ -216,7 +217,7 @@ export default function UploadZone({
           <p>{copy.description}</p>
         </div>
         <input
-          accept=".fits,.fit,.fts"
+          accept=".fits,.fit,.fts,.xisf"
           aria-label={copy.inputLabel}
           disabled={disabled || uploading}
           onChange={(event) => {

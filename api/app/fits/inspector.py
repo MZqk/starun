@@ -1,16 +1,21 @@
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
 from astropy.io import fits  # type: ignore[import-untyped]
+from xisf import XISF  # type: ignore[import-untyped]
 
 from app.fits.errors import (
     FitsInspectionError,
     FitsStatisticsError,
     InvalidFitsError,
+    InvalidXisfError,
     UnsupportedFitsDataError,
+    UnsupportedXisfDataError,
+    XisfStatisticsError,
 )
 from app.fits.schemas import BasicStatistics, FitsInspection, HduSummary
 
@@ -31,6 +36,25 @@ _BITPIX_DTYPES: dict[int, np.dtype[Any]] = {
     -32: np.dtype(np.float32),
     -64: np.dtype(np.float64),
 }
+
+_XISF_DTYPES: dict[str, np.dtype[Any]] = {
+    "UInt8": np.dtype(np.uint8),
+    "UInt16": np.dtype(np.uint16),
+    "UInt32": np.dtype(np.uint32),
+    "UInt64": np.dtype(np.uint64),
+    "Int8": np.dtype(np.int8),
+    "Int16": np.dtype(np.int16),
+    "Int32": np.dtype(np.int32),
+    "Int64": np.dtype(np.int64),
+    "Float32": np.dtype(np.float32),
+    "Float64": np.dtype(np.float64),
+}
+
+
+def inspect_image(path: Path) -> FitsInspection:
+    if path.suffix.lower() == ".xisf":
+        return inspect_xisf(path)
+    return inspect_fits(path)
 
 
 def inspect_fits(path: Path) -> FitsInspection:
@@ -59,6 +83,7 @@ def inspect_fits(path: Path) -> FitsInspection:
             statistics = _calculate_statistics(selected_hdu)
             header = _safe_header(selected_hdu.header)
             return FitsInspection(
+                format="fits",
                 hdus=summaries,
                 selected_hdu=selected,
                 statistics=statistics,
@@ -68,6 +93,90 @@ def inspect_fits(path: Path) -> FitsInspection:
         raise
     except (EOFError, OSError, TypeError, ValueError) as exc:
         raise InvalidFitsError() from exc
+
+
+def inspect_xisf(path: Path) -> FitsInspection:
+    try:
+        container = XISF(str(path))
+        metadata = container.get_images_metadata()
+        summaries = [
+            _summarize_xisf_image(index, image_metadata)
+            for index, image_metadata in enumerate(metadata)
+        ]
+        supported = [summary for summary in summaries if summary.supported]
+        if not supported:
+            raise UnsupportedXisfDataError()
+        selected = max(
+            supported,
+            key=lambda summary: (_pixel_count(summary.shape), -summary.index),
+        )
+        data = _normalize_xisf_layout(container.read_image(selected.index))
+        actual_dtype = np.dtype(data.dtype)
+        actual_shape = [int(length) for length in data.shape]
+        if not _is_supported_image(actual_shape, actual_dtype):
+            raise UnsupportedXisfDataError()
+        selected = selected.model_copy(
+            update={"shape": actual_shape, "dtype": actual_dtype.name}
+        )
+        summaries[selected.index] = selected
+        image_metadata = metadata[selected.index]
+        header = _safe_mapping_header(image_metadata.get("FITSKeywords", {}))
+        try:
+            statistics = _calculate_statistics(
+                SimpleNamespace(data=data, header={})
+            )
+        except FitsStatisticsError as exc:
+            raise XisfStatisticsError() from exc
+        return FitsInspection(
+            format="xisf",
+            hdus=summaries,
+            selected_hdu=selected,
+            statistics=statistics,
+            header=header,
+        )
+    except FitsInspectionError:
+        raise
+    except (EOFError, IndexError, KeyError, OSError, TypeError, ValueError) as exc:
+        raise InvalidXisfError() from exc
+
+
+def _summarize_xisf_image(index: int, metadata: dict[str, Any]) -> HduSummary:
+    geometry = metadata.get("geometry")
+    parts = (
+        list(geometry)
+        if isinstance(geometry, (list, tuple))
+        else str(geometry or "").split(":")
+    )
+    shape: list[int] | None = None
+    if len(parts) == 3:
+        try:
+            width, height, channels = (int(value) for value in parts)
+            shape = [height, width] if channels == 1 else [height, width, channels]
+        except ValueError:
+            shape = None
+    dtype = _XISF_DTYPES.get(str(metadata.get("sampleFormat", "")))
+    supported = (
+        shape is not None
+        and dtype is not None
+        and _is_supported_image(shape, dtype)
+    )
+    return HduSummary(
+        index=index,
+        name=str(metadata.get("id", "") or f"IMAGE_{index}"),
+        kind="xisf_image",
+        shape=shape,
+        dtype=dtype.name if dtype is not None else None,
+        supported=supported,
+    )
+
+
+def _normalize_xisf_layout(data: Any) -> np.ndarray[Any, Any]:
+    array = np.asarray(data)
+    if array.ndim == 3 and array.shape[-1] == 1:
+        return np.asarray(array[..., 0])
+    if array.ndim == 3 and array.shape[0] == 1:
+        return np.asarray(array[0])
+    return np.asarray(array)
 
 
 def _summarize_hdu(index: int, hdu: Any) -> HduSummary:
@@ -297,6 +406,29 @@ def _safe_header(header: fits.Header) -> dict[str, str | int | float | bool]:
                 result.pop(key)
             else:
                 result[key] = previous
+            break
+        if len(result) >= HEADER_ENTRY_LIMIT:
+            break
+    return result
+
+
+def _safe_mapping_header(value: Any) -> dict[str, str | int | float | bool]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, str | int | float | bool] = {}
+    for raw_key, raw_entries in list(value.items())[:HEADER_SCAN_LIMIT]:
+        key = str(raw_key).strip()
+        if not key or key.upper() in {"COMMENT", "HISTORY"}:
+            continue
+        if isinstance(raw_entries, list):
+            raw_value = raw_entries[0].get("value") if raw_entries else ""
+        elif isinstance(raw_entries, dict):
+            raw_value = raw_entries.get("value")
+        else:
+            raw_value = raw_entries
+        result[key] = _safe_header_value(raw_value)
+        if _serialized_header_size(result) > HEADER_TOTAL_BYTES_LIMIT:
+            result.pop(key)
             break
         if len(result) >= HEADER_ENTRY_LIMIT:
             break

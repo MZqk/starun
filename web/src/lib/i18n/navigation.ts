@@ -9,7 +9,7 @@ export const navigationCopy = {
     analysis: "专业分析",
     processing: "AI 自动出图",
     history: "历史记录",
-    upload: "上传 FITS",
+    upload: "上传 FITS/XISF",
     openMenu: "打开导航菜单",
     closeMenu: "关闭导航菜单",
   },

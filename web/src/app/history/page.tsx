@@ -236,6 +236,7 @@ export default function HistoryPage() {
         ) : null}
         {!loading && entries.length === 0 ? (
           <section className="empty-state">
+            <div className="border-mask" aria-hidden="true" />
             <h2>{copy.emptyTitle}</h2>
             <p>{copy.emptyDescription}</p>
             <Link className="button button--primary" href="/analysis">
@@ -251,6 +252,7 @@ export default function HistoryPage() {
               entry.type === "analysis" ? "/analysis" : "/processing";
             return (
               <article className="history-card" key={entry.taskId}>
+                <div className="border-mask" aria-hidden="true" />
                 <TaskThumbnail taskId={entry.taskId} />
                 <div className="history-card__content">
                   <div className="history-card__header">

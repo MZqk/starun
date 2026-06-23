@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -30,6 +30,7 @@ class BasicStatistics(BaseModel):
 
 
 class FitsInspection(BaseModel):
+    format: Literal["fits", "xisf"] = "fits"
     hdus: list[HduSummary]
     selected_hdu: HduSummary
     statistics: BasicStatistics

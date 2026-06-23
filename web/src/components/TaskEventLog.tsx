@@ -20,6 +20,7 @@ export default function TaskEventLog({
   const copy = zhCN.task11.events;
   return (
     <section className="event-log" aria-labelledby="event-log-title">
+      <div className="border-mask" aria-hidden="true" />
       <div className="panel-heading">
         <div>
           <span className={demo ? "mock-label" : "section-kicker"}>

@@ -63,6 +63,9 @@ class GeneratedArtwork(BaseModel):
     media_type: str = Field(pattern="^image/(png|jpeg)$")
     width: int = Field(gt=0)
     height: int = Field(gt=0)
+    provider_width: int = Field(gt=0)
+    provider_height: int = Field(gt=0)
+    normalized_to_requested_size: bool
     provider_request_id: str | None = None
     revised_prompt: str | None = None
     source_url_host: str | None = None

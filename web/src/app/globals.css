@@ -242,7 +242,7 @@ button {
   margin: 0;
   font-size: clamp(3.375rem, 5.35vw, 4.25rem);
   font-weight: 900;
-  letter-spacing: -0.058em;
+  letter-spacing: -0.035em;
   line-height: 1.04;
   text-wrap: balance;
 }
@@ -319,7 +319,7 @@ button {
   align-self: start;
   overflow: hidden;
   cursor: pointer;
-  border: 1px solid rgba(42, 42, 48, 0.78);
+  border: 1px solid transparent;
   border-radius: 1rem;
   margin-top: -1.25rem;
   padding: clamp(1.5rem, 3vw, 2rem);
@@ -573,7 +573,7 @@ button {
   position: relative;
   min-width: 0;
   overflow: hidden;
-  border: 1px solid rgba(42, 42, 48, 0.72);
+  border: 1px solid transparent;
   border-radius: 1rem;
   background:
     linear-gradient(135deg, rgba(232, 228, 221, 0.018), transparent 42%),
@@ -1073,6 +1073,22 @@ button {
   padding-top: 1rem;
 }
 
+.diagnostic-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-space-green);
+  box-shadow: 0 0 8px var(--color-space-green);
+  animation: diagnostic-pulse 2s infinite ease-in-out;
+  flex-shrink: 0;
+}
+
+.upload-diagnostic-bar.has-error .diagnostic-dot {
+  background: var(--color-space-accent);
+  box-shadow: 0 0 8px var(--color-space-accent);
+  animation: alert-pulse 0.5s infinite ease-in-out;
+}
+
 .diagnostic-line {
   flex: 1;
   height: 1px;
@@ -1103,6 +1119,32 @@ button {
   color: var(--color-space-text-muted);
   letter-spacing: 0.05em;
   font-weight: 600;
+}
+
+.upload-diagnostic-bar.has-error .diagnostic-text {
+  color: var(--color-space-accent);
+}
+
+.upload-diagnostic-bar.has-error .diagnostic-line::after {
+  background: linear-gradient(90deg, transparent, var(--color-space-accent), transparent);
+}
+
+.diagnostic-error-desc {
+  font-family: var(--type-mono);
+  font-size: 0.72rem;
+  color: var(--color-space-accent);
+  margin-top: 0.5rem;
+  letter-spacing: 0.025em;
+}
+
+@keyframes diagnostic-pulse {
+  0%, 100% { opacity: 0.5; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.15); box-shadow: 0 0 12px var(--color-space-green); }
+}
+
+@keyframes alert-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.20); box-shadow: 0 0 14px var(--color-space-accent); }
 }
 
 .site-footer {
@@ -1363,12 +1405,16 @@ button {
 .source-task-card,
 .history-card,
 .empty-state,
+.recovery-panel,
+.comparison-frame,
 .next-action {
   border: 1px solid rgba(42, 42, 48, 0.78);
   border-radius: 1rem;
   background:
     linear-gradient(135deg, rgba(232, 228, 221, 0.018), transparent 45%),
     var(--color-space-card);
+  position: relative;
+  overflow: hidden;
 }
 
 .upload-zone-wrap {
@@ -2760,5 +2806,212 @@ progress::-moz-progress-bar {
   .recovery-badge::before {
     animation: none;
     opacity: 0.85;
+  }
+  .diagnostic-dot {
+    animation: none !important;
+  }
+}
+
+/* Tooltip styles */
+[data-tooltip] {
+  position: relative;
+  cursor: help;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 125%;
+  left: 50%;
+  transform: translateX(-50%) scale(0.95);
+  background: rgba(20, 20, 22, 0.96);
+  border: 1px solid var(--color-space-border);
+  color: var(--color-space-text);
+  padding: 0.4rem 0.7rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  font-family: var(--type-ui);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease, transform 150ms ease;
+  z-index: 100;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.65);
+}
+
+[data-tooltip]:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+}
+
+/* Starfield and Aura styles from reference index.html */
+#starfield {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.aura {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(120px);
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.28;
+}
+
+.aura-1 {
+  width: 70vw;
+  height: 70vw;
+  max-width: 900px;
+  max-height: 900px;
+  background: radial-gradient(circle, rgba(155, 142, 196, 0.25) 0%, transparent 70%);
+  top: -20%;
+  right: -15%;
+  animation: aura-drift 18s ease-in-out infinite;
+}
+
+.aura-2 {
+  width: 60vw;
+  height: 60vw;
+  max-width: 800px;
+  max-height: 800px;
+  background: radial-gradient(circle, rgba(217, 56, 46, 0.18) 0%, transparent 70%);
+  bottom: -15%;
+  left: -10%;
+  animation: aura-drift 22s ease-in-out infinite reverse;
+}
+
+.aura-3 {
+  width: 40vw;
+  height: 40vw;
+  max-width: 500px;
+  max-height: 500px;
+  background: radial-gradient(circle, rgba(217, 136, 46, 0.15) 0%, transparent 70%);
+  top: 40%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  animation: aura-pulse 10s ease-in-out infinite;
+}
+
+@keyframes aura-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(30px, -30px) scale(1.06); }
+}
+
+@keyframes aura-pulse {
+  0%, 100% { opacity: 0.22; transform: translate(-50%, -50%) scale(1); }
+  50% { opacity: 0.35; transform: translate(-50%, -50%) scale(1.08); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aura,
+  .status-dot--completed {
+    animation: none !important;
+  }
+}
+
+/* Elegant border-mask gradient border logic */
+.border-mask {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 5;
+  transition: background 220ms ease;
+}
+
+.upload-signal:hover .border-mask {
+  background: linear-gradient(135deg, rgba(217, 56, 46, 0.45), rgba(155, 142, 196, 0.25), rgba(217, 136, 46, 0.15));
+}
+
+.feature-card:hover .border-mask {
+  background: linear-gradient(135deg, rgba(217, 56, 46, 0.35), rgba(155, 142, 196, 0.2), rgba(125, 155, 118, 0.1));
+}
+
+/* Override borders when border-mask is present to ensure proper gradient borders */
+.upload-zone-wrap:has(.border-mask),
+.result-panel:has(.border-mask),
+.task-status-panel:has(.border-mask),
+.event-log:has(.border-mask),
+.artifact-downloads:has(.border-mask),
+.agent-plan:has(.border-mask),
+.source-task-card:has(.border-mask),
+.history-card:has(.border-mask),
+.recovery-panel:has(.border-mask),
+.comparison-frame:has(.border-mask),
+.empty-state:has(.border-mask),
+.next-action:has(.border-mask) {
+  border-color: transparent;
+}
+
+/* Hover effect on synchronized card components */
+.upload-zone-wrap:hover .border-mask,
+.result-panel:hover .border-mask,
+.task-status-panel:hover .border-mask,
+.event-log:hover .border-mask,
+.artifact-downloads:hover .border-mask,
+.agent-plan:hover .border-mask,
+.source-task-card:hover .border-mask,
+.history-card:hover .border-mask,
+.recovery-panel:hover .border-mask,
+.comparison-frame:hover .border-mask,
+.empty-state:hover .border-mask,
+.next-action:hover .border-mask {
+  background: linear-gradient(135deg, rgba(217, 56, 46, 0.35), rgba(155, 142, 196, 0.2), rgba(125, 155, 118, 0.1));
+}
+
+/* Breathing pulse animation for task status dot */
+@keyframes pulse-green {
+  0% {
+    box-shadow: 0 0 0 0 rgba(125, 155, 118, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(125, 155, 118, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(125, 155, 118, 0);
+  }
+}
+
+.status-dot--completed {
+  animation: pulse-green 2s infinite ease-in-out;
+}
+
+/* Micro keyboard shortcut indicator for Style Selector */
+.style-shortcut-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0.55rem;
+  border: 1px solid rgba(232, 228, 221, 0.12);
+  border-radius: 4px;
+  padding: 0.1rem 0.38rem;
+  background: rgba(232, 228, 221, 0.04);
+  color: var(--color-space-text-muted);
+  font-family: var(--type-mono);
+  font-size: 0.65rem;
+  vertical-align: middle;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.style-selector input:checked + span .style-shortcut-kbd {
+  border-color: color-mix(in srgb, var(--color-space-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--color-space-accent) 15%, transparent);
+  color: var(--color-space-accent);
+}
+
+@media (max-width: 600px) {
+  [data-tooltip]::after {
+    white-space: normal;
+    width: min(220px, 80vw);
+    text-align: center;
   }
 }

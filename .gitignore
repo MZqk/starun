@@ -80,3 +80,14 @@ starun-home-*.png
 # --- Ad-hoc Utilities ---
 verify_okf.py
 web/next-env.d.ts
+
+# --- Deep Sky Processor Artifacts ---
+deep-sky-processor/*.jpg
+deep-sky-processor/*result*.json
+deep-sky-processor/*report*.json
+deep-sky-processor/*_report*.json
+deep-sky-processor/*_result*.json
+deep-sky-processor/*.txt
+deep-sky-processor/work/
+deep-sky-processor/work_enhanced/
+deep-sky-processor/work_natural/

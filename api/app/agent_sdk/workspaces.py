@@ -167,7 +167,7 @@ def build_task_manifest(
             ),
             "input": Dir(
                 children={
-                    "source.fits": LocalFile(src=source_path),
+                    Path(request.source_path).name: LocalFile(src=source_path),
                     "inspection.json": File(
                         content=json.dumps(
                             inspection.model_dump(mode="json"),

@@ -20,7 +20,7 @@ class SkillRequest(BaseModel):
     task_id: str = Field(min_length=1, max_length=128)
     task_type: TaskType
     locale: Literal["zh-CN"] = "zh-CN"
-    source_path: Literal["input/source.fits"] = "input/source.fits"
+    source_path: Literal["input/source.fits", "input/source.xisf"] = "input/source.fits"
     inspection_path: Literal["input/inspection.json"] = "input/inspection.json"
     output_dir: Literal["output"] = "output"
     style: ProcessingStyle | None = None

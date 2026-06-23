@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 from astropy.io import fits  # type: ignore[import-untyped]
 from PIL import Image
+from xisf import XISF  # type: ignore[import-untyped]
 
 
 MAX_PREVIEW_EDGE = 1600
@@ -42,6 +43,29 @@ def render_fits_preview(
     encoded = _encode_png(stretched)
     return FitsPreview(
         data=encoded,
+        width=int(stretched.shape[1]),
+        height=int(stretched.shape[0]),
+        lower_percentile=lower,
+        upper_percentile=upper,
+    )
+
+
+def render_image_preview(
+    path: Path,
+    image_index: int,
+    *,
+    max_edge: int = MAX_PREVIEW_EDGE,
+) -> FitsPreview:
+    if path.suffix.lower() != ".xisf":
+        return render_fits_preview(path, image_index, max_edge=max_edge)
+    container = XISF(str(path))
+    raw_image = np.asarray(container.read_image(image_index))
+    if raw_image.ndim == 3 and raw_image.shape[-1] == 1:
+        raw_image = raw_image[..., 0]
+    image = _sample_image(raw_image, max_edge=max_edge)
+    stretched, lower, upper = _stretch(image)
+    return FitsPreview(
+        data=_encode_png(stretched),
         width=int(stretched.shape[1]),
         height=int(stretched.shape[0]),
         lower_percentile=lower,

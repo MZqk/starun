@@ -7,7 +7,12 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from app.fits.errors import FitsStatisticsError, InvalidFitsError, UnsupportedFitsDataError
+from app.fits.errors import (
+    FitsStatisticsError,
+    InvalidFitsError,
+    InvalidXisfError,
+    UnsupportedFitsDataError,
+)
 from app.fits.inspector import (
     CHUNK_TARGET_BYTES,
     HEADER_ENTRY_LIMIT,
@@ -23,18 +28,22 @@ from app.fits.inspector import (
     _summarize_hdu,
     _safe_header,
     inspect_fits,
+    inspect_image,
+    inspect_xisf,
 )
 from app.fits.schemas import FitsInspection
 from tests.fixtures.fits_factory import (
     make_blank_scaled_fits,
     make_compressed_only_fits,
     make_corrupt_fits,
+    make_corrupt_xisf,
     make_fits,
     make_float_with_blank_header_fits,
     make_rgb_fits,
     make_scaled_fits,
     make_table_only_fits,
     make_uint16_fits,
+    make_xisf,
 )
 
 
@@ -113,6 +122,30 @@ def test_rejects_corrupt_bytes_with_safe_error(tmp_path: Path) -> None:
 
     assert exc_info.value.error_code == "invalid_fits"
     assert "corrupt.fits" not in str(exc_info.value)
+
+
+def test_inspects_xisf_image_statistics_and_metadata(tmp_path: Path) -> None:
+    data = np.arange(60, dtype=np.float32).reshape(6, 10)
+    path = make_xisf(tmp_path, data)
+
+    inspection = inspect_xisf(path)
+
+    assert inspection.format == "xisf"
+    assert inspection.selected_hdu.kind == "xisf_image"
+    assert inspection.selected_hdu.shape == [6, 10]
+    assert inspection.selected_hdu.dtype == "float32"
+    assert inspection.header["OBJECT"] == "M42"
+    assert inspection.statistics.minimum == 0.0
+    assert inspection.statistics.maximum == 59.0
+    assert inspection.statistics.finite_pixel_count == 60
+    assert inspect_image(path) == inspection
+
+
+def test_rejects_corrupt_xisf_with_format_specific_error(tmp_path: Path) -> None:
+    with pytest.raises(InvalidXisfError) as exc_info:
+        inspect_xisf(make_corrupt_xisf(tmp_path))
+
+    assert exc_info.value.error_code == "invalid_xisf"
 
 
 @pytest.mark.parametrize("shape", [(3, 8, 5), (8, 5, 3)])

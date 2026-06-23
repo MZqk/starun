@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     ai_api_key: SecretStr | None = None
     ai_model: str = "kimi-k2.6"
     ai_timeout_seconds: float = Field(default=180, gt=0, le=600)
+    art_direction_ai_timeout_seconds: float = Field(default=600, gt=0, le=900)
     agent_protocol: AgentProtocol = AgentProtocol.CHAT_COMPLETIONS
     image_ai_base_url: str = "https://tokenhub.tencentmaas.com/v1"
     image_ai_api_key: SecretStr | None = None

@@ -14,3 +14,9 @@ starun.db
 web/.env.local
 web/.next
 web/node_modules
+deep-sky-processor/work/
+deep-sky-processor/work_*/
+deep-sky-processor/*_result.json
+deep-sky-processor/*_report.json
+deep-sky-processor/masterLight_*.jpg
+deep-sky-processor/preview.jpg

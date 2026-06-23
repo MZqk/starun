@@ -383,6 +383,7 @@ export default function AnalysisPage() {
 
         {((task && task.status === "failed") || (!task && initialStatus === "failed")) && (
           <div className="recovery-panel">
+            <div className="border-mask" aria-hidden="true" />
             <div className="recovery-header">
               <span className="recovery-badge">FAULT_RECOVERY_ENGAGED</span>
               <h3>分析任务执行未成功</h3>
@@ -436,6 +437,7 @@ export default function AnalysisPage() {
             aria-label={copy.realDataAriaLabel}
             className="result-panel"
           >
+            <div className="border-mask" aria-hidden="true" />
             <div className="panel-heading">
               <div>
                 <span className="section-kicker">{copy.realDataKicker}</span>
@@ -523,6 +525,7 @@ export default function AnalysisPage() {
 
         {analysis ? (
           <section className="result-panel ai-analysis-panel">
+            <div className="border-mask" aria-hidden="true" />
             <div className="panel-heading">
               <div>
                 <span className="section-kicker">{copy.aiKicker}</span>
@@ -658,6 +661,7 @@ export default function AnalysisPage() {
 
         {sourceValid && taskId ? (
           <div className="next-action">
+            <div className="border-mask" aria-hidden="true" />
             <div>
               <span className="section-kicker">{copy.continueKicker}</span>
               <h2>{copy.sourceValid}</h2>

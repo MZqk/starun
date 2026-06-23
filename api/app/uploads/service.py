@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.db.models import Upload, UploadStatus
 from app.fits.errors import FitsInspectionError
-from app.fits.inspector import inspect_fits
+from app.fits.inspector import inspect_image
 from app.fits.schemas import FitsInspection
 from app.filesystem import (
     create_regular_file_fd,
@@ -33,7 +33,7 @@ from app.uploads.errors import (
 
 CHUNK_SIZE = 1024 * 1024
 MAX_ORIGINAL_FILENAME_LENGTH = 255
-SUPPORTED_EXTENSIONS = {".fits", ".fit", ".fts"}
+SUPPORTED_EXTENSIONS = {".fits", ".fit", ".fts", ".xisf"}
 
 Inspector = Callable[[Path], FitsInspection]
 DiskUsage = Callable[[Path], shutil._ntuple_diskusage]
@@ -46,7 +46,7 @@ def get_settings() -> Settings:
 
 
 def get_inspector() -> Inspector:
-    return inspect_fits
+    return inspect_image
 
 
 def get_disk_usage() -> DiskUsage:
@@ -82,7 +82,7 @@ class UploadService:
         self,
         session: Session,
         settings: Settings,
-        inspector: Inspector = inspect_fits,
+        inspector: Inspector = inspect_image,
         disk_usage: DiskUsage = shutil.disk_usage,
         clock: Clock = _utc_now,
     ) -> None:

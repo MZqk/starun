@@ -91,6 +91,7 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 ./node_modules/.bin/next dev --we
 | `STARUN_AI_API_KEY` | 空 | Kimi 等多模态模型服务端密钥。必须配置后才能执行真实 AI 分析和出图规划。 |
 | `STARUN_AI_MODEL` | `kimi-k2.6` | 专业分析和出图规划使用的模型。 |
 | `STARUN_AI_TIMEOUT_SECONDS` | `180` | 专业分析和出图规划请求超时时间。 |
+| `STARUN_ART_DIRECTION_AI_TIMEOUT_SECONDS` | `600` | 艺术模式下 Kimi 视觉识别与提示词生成的超时时间。 |
 | `STARUN_IMAGE_AI_BASE_URL` | `https://tokenhub.tencentmaas.com/v1` | OpenAI-compatible 图片生成 API 地址。 |
 | `STARUN_IMAGE_AI_API_KEY` | 空 | 图片生成模型服务端密钥。 |
 | `STARUN_IMAGE_AI_MODEL` | `hy-image-v3.0` | AI 自动出图使用的图片生成模型。 |

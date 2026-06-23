@@ -19,13 +19,20 @@ export default function HomePage() {
   const { home } = zhCN;
   const router = useRouter();
   const [isDragging, setIsDragging] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && /\.(fits|fit|fts)$/i.test(file.name)) {
+    if (!file) return;
+    if (/\.(fits|fit|fts|xisf)$/i.test(file.name)) {
+      setUploadError(null);
       fileTransfer.set(file);
       router.push("/analysis");
+    } else {
+      setUploadError("ERR_INVALID_FILE_TYPE");
+      if (e.target) e.target.value = "";
+      setTimeout(() => setUploadError(null), 4000);
     }
   };
 
@@ -69,9 +76,14 @@ export default function HomePage() {
       dragCounter = 0;
 
       const file = e.dataTransfer?.files?.[0];
-      if (file && /\.(fits|fit|fts)$/i.test(file.name)) {
+      if (!file) return;
+      if (/\.(fits|fit|fts|xisf)$/i.test(file.name)) {
+        setUploadError(null);
         fileTransfer.set(file);
         router.push("/analysis");
+      } else {
+        setUploadError("ERR_INVALID_FILE_TYPE");
+        setTimeout(() => setUploadError(null), 4000);
       }
     };
 
@@ -95,7 +107,7 @@ export default function HomePage() {
       window.removeEventListener("drop", handleDrop);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [router]);
+  }, [router, setUploadError]);
 
   return (
     <>
@@ -103,7 +115,7 @@ export default function HomePage() {
         <div className="drag-overlay">
           <div className="drag-overlay__content">
             <UploadIcon size={48} />
-            <p>释放文件以开始 FITS 分析</p>
+            <p>释放文件以开始天文图像分析</p>
           </div>
         </div>
       )}
@@ -135,11 +147,12 @@ export default function HomePage() {
               onClick={handleUploadCardClick}
               onKeyDown={handleUploadCardKeyDown}
             >
+              <div className="border-mask" aria-hidden="true" />
               <input
                 type="file"
                 ref={fileInputRef}
                 onChange={handleFileChange}
-                accept=".fits,.fit,.fts"
+                accept=".fits,.fit,.fts,.xisf"
                 style={{ display: "none" }}
               />
               <div className="upload-signal__orb" aria-hidden="true">
@@ -159,10 +172,18 @@ export default function HomePage() {
               </dl>
               <span className="upload-scope">{home.uploadSignal.scope}</span>
               <p className="upload-quota">{home.uploadSignal.quota}</p>
-              <div className="upload-diagnostic-bar" aria-hidden="true">
+              <div className={`upload-diagnostic-bar ${uploadError ? "has-error" : ""}`} aria-hidden="true">
+                <span className="diagnostic-dot"></span>
                 <span className="diagnostic-line"></span>
-                <span className="diagnostic-text">READY_TO_PARSE_HDU</span>
+                <span className="diagnostic-text" data-tooltip={uploadError ? "仅支持 .fits, .fit, .fts, .xisf 格式的天文图像源文件" : "准备好解析 FITS HDU 或 XISF 图像数据"}>
+                  {uploadError ? "ERR_FILE_REJECTED" : "READY_TO_PARSE_HDU"}
+                </span>
               </div>
+              {uploadError && (
+                <div className="diagnostic-error-desc" role="alert">
+                  [!] LIMIT_FORMAT: ONLY_.FITS_.FIT_.FTS_.XISF_ALLOWED
+                </div>
+              )}
             </aside>
           </div>
         </section>
@@ -226,11 +247,6 @@ export default function HomePage() {
             </div>
             <ol className="steps-list">
               {home.steps.items.map((step, index) => {
-                const stepMetaCodes = [
-                  "INPUT: FITS_RAW_DATA | VERIFY: HDU_STRUCTURE",
-                  "METHOD: AI_DEEP_ADVISOR | ENGINE: KIMI_INTELLIGENT",
-                  "OUTPUT: L1_CALIBRATED_REPORT | ARTIFACT_PNG_TIFF"
-                ];
                 return (
                   <li key={step.title}>
                     <div className="step-badge">
@@ -241,7 +257,19 @@ export default function HomePage() {
                       <h3>{step.title}</h3>
                       <p>{step.description}</p>
                       <div className="step-meta" aria-hidden="true">
-                        <code>{stepMetaCodes[index]}</code>
+                        {index === 0 ? (
+                          <code>
+                            INPUT: FITS_RAW_DATA | VERIFY: <span data-tooltip="Header Data Unit (文件头数据单元)，FITS 文件中的独立数据块">HDU_STRUCTURE</span>
+                          </code>
+                        ) : index === 1 ? (
+                          <code>
+                            METHOD: AI_DEEP_ADVISOR | ENGINE: <span data-tooltip="集成了专为天文图像定制优化的智能参数建议引擎">KIMI_INTELLIGENT</span>
+                          </code>
+                        ) : (
+                          <code>
+                            OUTPUT: L1_CALIBRATED_REPORT | <span data-tooltip="校准处理完毕后，可下载高动态范围的 TIFF 格式或 PNG 预览图">ARTIFACT_PNG_TIFF</span>
+                          </code>
+                        )}
                       </div>
                     </div>
                   </li>
@@ -254,7 +282,7 @@ export default function HomePage() {
         <section className="privacy-section">
           <div className="page-shell privacy-layout">
             <div className="privacy-card">
-              <div className="sandbox-badge" aria-hidden="true">
+              <div className="sandbox-badge" aria-hidden="true" data-tooltip="所有天文图像处理都在您浏览器的本地沙盒环境中运行，数据绝对安全">
                 <span className="sandbox-badge__dot"></span>
                 <span className="sandbox-badge__text">LOCAL_SANDBOX_ACTIVE // NO_USER_DATA_LOGGED</span>
               </div>
@@ -264,7 +292,7 @@ export default function HomePage() {
             <div className="resource-panel-minimal">
               <div className="resource-header">
                 <span className="resource-header__title">HARDWARE_CONSTRAINTS</span>
-                <span className="resource-header__status">CPU_LIMITED</span>
+                <span className="resource-header__status" data-tooltip="本地 CPU 运算性能有限，建议单次仅上传单个 FITS 图像">CPU_LIMITED</span>
               </div>
               <p className="resource-note">{home.privacy.resource}</p>
             </div>
