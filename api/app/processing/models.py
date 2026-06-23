@@ -12,7 +12,7 @@ class ArtDirection(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     target_summary: str = Field(min_length=1, max_length=240)
-    visible_subject: str = Field(min_length=1, max_length=160)
+    visible_subject: str = Field(min_length=1, max_length=512)
     quality_notes: list[str] = Field(min_length=1, max_length=8)
     generation_prompt: str = Field(min_length=20, max_length=1600)
     negative_prompt: str = Field(min_length=1, max_length=600)

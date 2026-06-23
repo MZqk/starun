@@ -54,6 +54,7 @@ class TokenHubImageProvider:
             "image": "data:image/png;base64," + base64.b64encode(reference_png).decode("ascii"),
             "response_format": "b64_json",
             "n": 1,
+            "LogoAdd": 0,
         }
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:

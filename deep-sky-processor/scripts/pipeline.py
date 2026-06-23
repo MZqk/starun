@@ -444,7 +444,7 @@ def make_decision_preview(image, max_dimension=1920):
 
 
 def resolve_memory_plan(shape, steps, low_memory=False,
-                        auto_low_memory=True, threshold_mpix=8.0,
+                        auto_low_memory=True, threshold_mpix=10.0,
                         tile_size=None, external_starless=False):
     """Resolve low-memory behavior without downsampling final processing."""
     h, w = shape[:2]
@@ -896,7 +896,7 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
                  plate_solve_timeout=180, catalog=None,
                  recognition_workflow_dir=None,
                  low_memory=False, auto_low_memory=True,
-                 low_memory_threshold_mpix=8.0,
+                 low_memory_threshold_mpix=10.0,
                  reference_image=None, reference_auto_search=False,
                  reference_strength=0.85,
                  reference_match_orientation=False):
@@ -1085,11 +1085,21 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
             }
             print(f"[WARN] 天区解析失败: {exc}")
 
-    # FITS 输入自动增强: 线性数据暗部更密集，适度提升
+    # FITS 输入自动增强: 线性数据暗部更密集，对于未经诊断自适应或显式覆盖的基准预设参数适度提升
     if is_linear_input:
-        cfg['stretch_factor'] = cfg['stretch_factor'] * 1.5
-        cfg['star_stretch_factor'] = cfg['star_stretch_factor'] * 1.5
-        print("[线性输入] stretch因子×1.5，星点拉伸×1.5")
+        has_adaptive_or_override_stretch = (preset == 'adaptive' and analysis_report is not None) or (override_params and 'stretch_factor' in override_params)
+        if not has_adaptive_or_override_stretch:
+            cfg['stretch_factor'] = cfg['stretch_factor'] * 1.5
+            print("[线性输入] 未经自适应优化，应用基准 stretch 因子 ×1.5 增强")
+        else:
+            print("[线性输入] 检测到自适应推荐或显式覆盖，保持 stretch 因子不变")
+
+        has_adaptive_or_override_star = (preset == 'adaptive' and analysis_report is not None) or (override_params and 'star_stretch_factor' in override_params)
+        if not has_adaptive_or_override_star:
+            cfg['star_stretch_factor'] = cfg['star_stretch_factor'] * 1.5
+            print("[线性输入] 未经自适应优化，应用基准星点拉伸因子 ×1.5 增强")
+        else:
+            print("[线性输入] 检测到自适应推荐或显式覆盖，保持星点拉伸因子不变")
 
     # RGBA 处理
     has_alpha = img.ndim == 3 and img.shape[2] == 4
@@ -2139,8 +2149,8 @@ def main():
     p.add_argument(
         '--low-memory-threshold-mpix',
         type=float,
-        default=8.0,
-        help='自动低内存模式阈值，单位百万像素（默认: 8）',
+        default=10.0,
+        help='自动低内存模式阈值，单位百万像素（默认: 10）',
     )
     p.add_argument('--external-starless', default=None,
                    help='外部工具生成的无星图，如 StarNet++ starless.tif')

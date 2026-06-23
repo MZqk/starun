@@ -90,7 +90,7 @@ class ProcessingSkillResult(BaseModel):
     reference_artifact: str
     result_artifact: str
     target_summary: str = Field(min_length=1, max_length=240)
-    visible_subject: str = Field(min_length=1, max_length=160)
+    visible_subject: str = Field(min_length=1, max_length=512)
     art_direction_summary: str = Field(min_length=1, max_length=1600)
     quality_score: float = Field(ge=0, le=1)
     result_width: int | None = Field(default=None, gt=0)
@@ -113,6 +113,15 @@ class ProcessingSkillResult(BaseModel):
             raise ValueError("processing artifacts are not declared")
         if self.style is ProcessingStyle.BALANCED and "style-prompt.json" not in names:
             raise ValueError("balanced processing must declare style-prompt.json")
+
+        allowed_extensions = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".fits", ".fit", ".fts"}
+        for attr, val in [("reference_artifact", self.reference_artifact), ("result_artifact", self.result_artifact)]:
+            suffix = PurePosixPath(val).suffix.lower()
+            if suffix not in allowed_extensions:
+                raise ValueError(
+                    f"{attr} must be an image file (one of {', '.join(allowed_extensions)}), "
+                    f"but got: '{val}'"
+                )
         return self
 
 

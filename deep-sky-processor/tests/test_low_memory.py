@@ -17,7 +17,7 @@ from pipeline import make_decision_preview, resolve_memory_plan, run_pipeline
 class LowMemoryTests(unittest.TestCase):
     def test_large_image_auto_enables_low_memory(self):
         steps, tile_size, report = resolve_memory_plan(
-            (2160, 3840, 3),
+            (3000, 4000, 3),
             [
                 "color", "star_remove", "stretch", "star_process",
                 "star_combine", "star_reduce",
@@ -34,7 +34,7 @@ class LowMemoryTests(unittest.TestCase):
 
     def test_external_starless_preserves_star_pipeline(self):
         steps, _tile_size, report = resolve_memory_plan(
-            (2160, 3840, 3),
+            (3000, 4000, 3),
             ["star_remove", "stretch", "star_process", "star_combine"],
             external_starless=True,
         )

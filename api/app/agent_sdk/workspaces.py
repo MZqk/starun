@@ -43,7 +43,7 @@ REQUIRED_SKILL_RUNTIME_MODULES = (
 
 class StarunExecCommandTool(ExecCommandTool):
     async def run(self, args: ExecCommandArgs) -> str:
-        return await super().run(args.model_copy(update={"tty": True}))
+        return await super().run(args.model_copy(update={"tty": True, "yield_time_ms": 300000}))
 
 
 def _configure_shell_tools(toolset: ShellToolSet) -> None:
@@ -74,8 +74,9 @@ def build_task_manifest(
     runtime_python = str(Path(sys.executable).absolute())
     python_wrapper = (
         "#!/bin/sh\n"
-        "unset VIRTUAL_ENV PYTHONHOME PYTHONPATH __PYVENV_LAUNCHER__ "
-        "STARUN_SKILL_PYTHON\n"
+        "unset PYTHONHOME __PYVENV_LAUNCHER__ STARUN_SKILL_PYTHON\n"
+        "export VIRTUAL_ENV=\"/app/.venv\"\n"
+        "export PYTHONPATH=\"/app/.venv/lib/python3.12/site-packages\"\n"
         f"exec {runtime_python!r} \"$@\"\n"
     ).encode("utf-8")
     executable_permissions = Permissions(owner=0o7, group=0o5, other=0o5)
@@ -83,24 +84,57 @@ def build_task_manifest(
         str(Path(sys.prefix).resolve()),
         str(Path(sys.base_prefix).resolve()),
     }
+    import shutil
+    starnet_dir = None
+    starnet_bin = shutil.which("starnet2") or shutil.which("starnet++")
+    if starnet_bin:
+        starnet_dir = Path(starnet_bin).resolve().parent
+    else:
+        project_root = Path(__file__).resolve().parents[3]
+        candidates = [
+            project_root / "api" / "starnet2",
+            project_root / "deep-sky-processor" / "scripts" / "StarNet2",
+        ]
+        for candidate in candidates:
+            if (candidate / "starnet++").is_file() or (candidate / "starnet2").is_file():
+                starnet_dir = candidate.resolve()
+                break
+    if starnet_dir:
+        runtime_roots.add(str(starnet_dir))
+
     result_type = (
         AnalysisSkillResult | SkillFailureResult
         if request.task_type.value == "analysis"
         else ProcessingSkillResult | SkillFailureResult
     )
     result_schema = TypeAdapter(result_type).json_schema()
+    host_tmps = set()
+    if sys.platform == "darwin":
+        import tempfile
+        host_tmp = tempfile.gettempdir()
+        resolved_host_tmp = str(Path(host_tmp).resolve())
+        host_tmps.add(host_tmp)
+        host_tmps.add(resolved_host_tmp)
+
+    sandbox_path = f"{workspace_root}/bin:/usr/local/bin:/usr/bin:/bin"
+    if starnet_dir:
+        sandbox_path = f"{sandbox_path}:{starnet_dir}"
+
     return Manifest(
         root=workspace_root,
         environment=Environment(
             value={
                 "STARUN_SKILL_SANDBOX": "1",
-                "PATH": f"{workspace_root}/bin:/usr/local/bin:/usr/bin:/bin",
-                "VIRTUAL_ENV": "",
+                "PATH": sandbox_path,
+                "VIRTUAL_ENV": "/app/.venv",
                 "PYTHONHOME": "",
-                "PYTHONPATH": "",
+                "PYTHONPATH": "/app/.venv/lib/python3.12/site-packages",
                 "__PYVENV_LAUNCHER__": "",
                 "PYTHONDONTWRITEBYTECODE": "1",
                 "PYTHONNOUSERSITE": "1",
+                "TMPDIR": "/tmp",
+                "TEMP": "/tmp",
+                "TMP": "/tmp",
             }
         ),
         extra_path_grants=tuple(
@@ -110,6 +144,13 @@ def build_task_manifest(
                 description="Preinstalled Python runtime used by Starun skills.",
             )
             for path in sorted(runtime_roots)
+        ) + tuple(
+            SandboxPathGrant(
+                path=path,
+                read_only=False,
+                description="Host temp directory for CoreML model compilation.",
+            )
+            for path in sorted(host_tmps)
         ),
         entries={
             "bin": Dir(

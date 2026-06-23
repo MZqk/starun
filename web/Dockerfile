@@ -1,4 +1,4 @@
-FROM node:22-alpine
+FROM docker.m.daocloud.io/library/node:22-alpine
 
 WORKDIR /app
 

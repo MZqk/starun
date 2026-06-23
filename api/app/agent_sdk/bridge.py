@@ -168,10 +168,17 @@ class AgentSdkBridge:
         cancellation_check: Callable[[], bool],
         event_sink: BridgeEventSink,
     ) -> PublishedSkillRun:
+        event_sink_error = None
+
         async def emit(event_type: str, payload: dict[str, object]) -> None:
-            result = event_sink(event_type, payload)
-            if inspect.isawaitable(result):
-                await result
+            nonlocal event_sink_error
+            try:
+                result = event_sink(event_type, payload)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as exc:
+                event_sink_error = exc
+                raise
 
         if spec.task_type is TaskType.PROCESSING and spec.style is ProcessingStyle.ARTISTIC:
             return await self._run_artistic(
@@ -191,24 +198,25 @@ class AgentSdkBridge:
                 await asyncio.sleep(self._poll_interval_seconds)
             try:
                 await task
-            except (MaxTurnsExceeded, ModelBehaviorError) as exc:
-                logger.exception(f"Agent run failed or was rejected by model adapter: {exc}")
-                raise AgentGuardrailError("Agent run was rejected.") from exc
-            except (
-                InputGuardrailTripwireTriggered,
-                OutputGuardrailTripwireTriggered,
-            ) as exc:
-                logger.exception(f"Agent run triggered sandbox guardrail tripwire: {exc}")
-                raise AgentGuardrailError("Agent guardrail rejected the run.") from exc
-            except (APITimeoutError, APIConnectionError, RateLimitError) as exc:
-                raise AgentProviderError(str(exc), retryable=True) from exc
-            except APIStatusError as exc:
-                raise AgentProviderError(
-                    str(exc),
-                    retryable=exc.status_code == 429 or exc.status_code >= 500,
-                ) from exc
-            except OSError as exc:
-                raise SkillExecutionError(str(exc), retryable=False) from exc
+            except Exception as exc:
+                if event_sink_error is not None:
+                    raise event_sink_error from exc
+                if isinstance(exc, (MaxTurnsExceeded, ModelBehaviorError)):
+                    logger.exception(f"Agent run failed or was rejected by model adapter: {exc}")
+                    raise AgentGuardrailError("Agent run was rejected.") from exc
+                if isinstance(exc, (InputGuardrailTripwireTriggered, OutputGuardrailTripwireTriggered)):
+                    logger.exception(f"Agent run triggered sandbox guardrail tripwire: {exc}")
+                    raise AgentGuardrailError("Agent guardrail rejected the run.") from exc
+                if isinstance(exc, (APITimeoutError, APIConnectionError, RateLimitError)):
+                    raise AgentProviderError(str(exc), retryable=True) from exc
+                if isinstance(exc, APIStatusError):
+                    raise AgentProviderError(
+                        str(exc),
+                        retryable=exc.status_code == 429 or exc.status_code >= 500,
+                    ) from exc
+                if isinstance(exc, OSError):
+                    raise SkillExecutionError(str(exc), retryable=False) from exc
+                raise exc
             result = await self._read_and_publish(runtime, spec, artifact_store)
             await emit("run_completed", {"artifact_count": len(result.artifacts)})
             return result
@@ -295,7 +303,11 @@ class AgentSdkBridge:
                     direction=direction,
                 )
             except ImageProviderError as exc:
-                raise SkillExecutionError(str(exc), retryable=exc.retryable) from exc
+                raise SkillExecutionError(
+                    str(exc),
+                    retryable=exc.retryable,
+                    code=exc.code,
+                ) from exc
             direction_artifact = artifact_store.write_json(
                 "art-direction.json",
                 direction.model_dump(mode="json"),
