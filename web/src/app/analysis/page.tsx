@@ -71,7 +71,7 @@ export default function AnalysisPage() {
   useEffect(() => {
     const transferFile = fileTransfer.get();
     if (transferFile) {
-      setInitialFile(transferFile);
+      queueMicrotask(() => setInitialFile(transferFile));
     }
   }, []);
   const [initialStatus, setInitialStatus] = useState<TaskStatus | null>(null);
@@ -142,7 +142,7 @@ export default function AnalysisPage() {
     [],
   );
 
-  async function createTask() {
+  const createTask = useCallback(async () => {
     if (!upload) return;
     setCreating(true);
     setActionError(null);
@@ -183,9 +183,9 @@ export default function AnalysisPage() {
     } finally {
       setCreating(false);
     }
-  }
+  }, [copy.createError, fileName, upload]);
 
-  async function cancelTask() {
+  const cancelTask = useCallback(async () => {
     if (!taskId) return;
     setCancelling(true);
     setActionError(null);
@@ -197,7 +197,7 @@ export default function AnalysisPage() {
     } finally {
       setCancelling(false);
     }
-  }
+  }, [copy.cancelError, refresh, taskId]);
 
   const resetToUpload = useCallback(() => {
     setTaskId(null);
@@ -329,7 +329,16 @@ export default function AnalysisPage() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [taskId, upload, creating, task, cancelling, sourceValid]);
+  }, [
+    taskId,
+    upload,
+    creating,
+    task,
+    cancelling,
+    sourceValid,
+    createTask,
+    cancelTask,
+  ]);
 
   const activePreview =
     preview?.taskId === taskId ? preview : null;
@@ -354,7 +363,11 @@ export default function AnalysisPage() {
                 type="button"
               >
                 {creating ? copy.creating : copy.create}
-                {!creating && upload && <kbd className="shortcut-kbd">↵ Enter</kbd>}
+                {!creating && upload && (
+                  <kbd aria-hidden="true" className="shortcut-kbd">
+                    ↵ Enter
+                  </kbd>
+                )}
               </button>
               <span>{copy.quotaNotice}</span>
             </div>
@@ -654,7 +667,9 @@ export default function AnalysisPage() {
               href={`/processing?source_task_id=${encodeURIComponent(taskId)}`}
             >
               {copy.processAction}
-              <kbd className="shortcut-kbd">P</kbd>
+              <kbd aria-hidden="true" className="shortcut-kbd">
+                P
+              </kbd>
             </Link>
           </div>
         ) : null}

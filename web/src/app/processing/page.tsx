@@ -26,7 +26,11 @@ const historyRepository = new TaskHistoryRepository();
 const STYLE_VALUES: ProcessingStyle[] = ["realistic", "balanced", "artistic"];
 const FALLBACK_AGENT_STEPS: Record<ProcessingStyle, readonly string[]> = {
   realistic: ["deep-sky-processor"],
-  balanced: ["kimi.style_prompt", "deep-sky-processor"],
+  balanced: [
+    "processing.prepare_reference",
+    "processing.plan_art_direction",
+    "processing.generate_artwork",
+  ],
   artistic: ["kimi.art_direction", "tencent.hunyuan_image"],
 };
 

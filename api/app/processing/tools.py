@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.agent.contracts import TaskContext, ToolResult
 from app.analysis import render_fits_preview
+from app.artifacts.contracts import JsonValue
 from app.artifacts.store import ArtifactStore
 from app.config import Settings
 from app.db.models import ProcessingStyle
@@ -121,7 +122,7 @@ class GenerateArtworkTool:
         )
         name = "generated-artwork.jpg" if generated.media_type == "image/jpeg" else "generated-artwork.png"
         image_artifact = self._store.write_bytes(name, generated.data)
-        record = {
+        record: dict[str, JsonValue] = {
             "artifact": image_artifact.model_dump(mode="json"),
             "width": generated.width,
             "height": generated.height,

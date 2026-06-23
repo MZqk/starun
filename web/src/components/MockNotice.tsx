@@ -12,14 +12,19 @@ export default function MockNotice({ compact = false }: MockNoticeProps) {
   const [hidden, setHidden] = useState(true);
 
   useEffect(() => {
+    if (typeof localStorage === "undefined") {
+      return;
+    }
     const isHidden = localStorage.getItem("starun_mock_notice_hidden") === "true";
     if (!isHidden) {
-      setHidden(false);
+      queueMicrotask(() => setHidden(false));
     }
   }, []);
 
   const handleClose = () => {
-    localStorage.setItem("starun_mock_notice_hidden", "true");
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("starun_mock_notice_hidden", "true");
+    }
     setHidden(true);
   };
 
@@ -52,4 +57,3 @@ export default function MockNotice({ compact = false }: MockNoticeProps) {
     </aside>
   );
 }
-

@@ -175,7 +175,7 @@ export default function UploadZone({
 
   useEffect(() => {
     if (initialFile) {
-      void uploadFile(initialFile);
+      queueMicrotask(() => void uploadFile(initialFile));
     }
   }, [initialFile, uploadFile]);
 

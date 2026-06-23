@@ -6,8 +6,6 @@ import os
 from typing import cast
 
 from dotenv import load_dotenv
-load_dotenv()
-
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
@@ -24,6 +22,9 @@ from app.tasks.recovery import recover_interrupted_tasks
 from app.tasks.router import router as tasks_router
 from app.uploads.middleware import UploadRequestGuardMiddleware
 from app.uploads.router import router as uploads_router
+
+
+load_dotenv()
 
 
 def _application_session_factory() -> sessionmaker[Session]:

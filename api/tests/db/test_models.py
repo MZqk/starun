@@ -126,7 +126,7 @@ def test_settings_defaults(monkeypatch) -> None:
     for setting_name in Settings.model_fields:
         monkeypatch.delenv(f"STARUN_{setting_name.upper()}", raising=False)
 
-    settings = Settings()
+    settings = Settings(_env_file=None)
 
     assert settings.database_url == "sqlite:///./starun.db"
     assert settings.data_root == Path("./data")

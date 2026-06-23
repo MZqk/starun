@@ -15,7 +15,9 @@ from app.tasks.executor import SerialTaskExecutor
 
 
 @pytest.fixture(autouse=True)
-def isolated_rate_limiters() -> Generator[None, None, None]:
+def isolated_rate_limiters(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
+    for setting_name in Settings.model_fields:
+        monkeypatch.delenv(f"STARUN_{setting_name.upper()}", raising=False)
     reset_rate_limiters()
     yield
     reset_rate_limiters()
@@ -31,8 +33,11 @@ def data_root(tmp_path: Path) -> Path:
 @pytest.fixture
 def settings(tmp_path: Path, data_root: Path) -> Settings:
     return Settings(
+        _env_file=None,
         database_url=f"sqlite:///{tmp_path / 'test.db'}",
         data_root=data_root,
+        ai_api_key="test-ai-key",
+        image_ai_api_key="test-image-ai-key",
         max_upload_bytes=1024 * 1024,
         min_free_disk_bytes=0,
     )

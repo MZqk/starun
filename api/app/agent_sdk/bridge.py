@@ -5,7 +5,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agents import Agent, RunConfig, Runner, function_tool
 from agents.exceptions import (
@@ -33,6 +33,7 @@ from app.agent_sdk.errors import (
     SkillExecutionError,
     SkillOutputError,
 )
+from app.artifacts.contracts import JsonValue
 from app.agent_sdk.providers import build_agent_model
 from app.agent_sdk.runtime import OpenAiSandboxRuntime
 from app.agent_sdk.runtime_types import AgentSdkRunSpec, AgentSdkRuntime
@@ -564,8 +565,8 @@ class AgentSdkBridge:
                     "result_height": processing_result.result_height or 0,
                     "provider_request_id": processing_result.provider_request_id,
                     "pipeline_status": processing_result.pipeline_status,
-                    "quality_gates": processing_result.quality_gates,
-                    "warnings": processing_result.warnings,
+                    "quality_gates": cast(JsonValue, processing_result.quality_gates),
+                    "warnings": cast(JsonValue, processing_result.warnings),
                     "disclaimer": ARTWORK_DISCLAIMER,
                 },
             )

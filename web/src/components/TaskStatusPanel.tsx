@@ -57,7 +57,7 @@ export default function TaskStatusPanel({
       active = false;
       clearInterval(timer);
     };
-  }, [task?.expires_at, task?.id, task?.status]);
+  }, [task]);
 
   if (!status) {
     return null;
@@ -138,7 +138,11 @@ export default function TaskStatusPanel({
           type="button"
         >
           {busy ? copy.cancelling : copy.cancel}
-          {!busy && <kbd className="shortcut-kbd">Esc</kbd>}
+          {!busy && (
+            <kbd aria-hidden="true" className="shortcut-kbd">
+              Esc
+            </kbd>
+          )}
         </button>
       ) : null}
     </section>

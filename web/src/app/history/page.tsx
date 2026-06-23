@@ -51,7 +51,7 @@ function getHash(str: string): number {
   return Math.abs(hash);
 }
 
-function TaskThumbnail({ taskId, type }: { taskId: string; type: string }) {
+function TaskThumbnail({ taskId }: { taskId: string }) {
   const hash = getHash(taskId);
   const hue1 = hash % 360;
   const hue2 = (hue1 + 120) % 360;
@@ -251,7 +251,7 @@ export default function HistoryPage() {
               entry.type === "analysis" ? "/analysis" : "/processing";
             return (
               <article className="history-card" key={entry.taskId}>
-                <TaskThumbnail taskId={entry.taskId} type={entry.type} />
+                <TaskThumbnail taskId={entry.taskId} />
                 <div className="history-card__content">
                   <div className="history-card__header">
                     <div>

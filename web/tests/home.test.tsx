@@ -23,6 +23,7 @@ const navBarSource = readFileSync(
 
 vi.mock("next/navigation", () => ({
   usePathname: () => pathname,
+  useRouter: () => ({ push: vi.fn() }),
 }));
 
 describe("home page", () => {
@@ -50,13 +51,14 @@ describe("home page", () => {
     );
   });
 
-  it("keeps the compact FITS signal panel informative but noninteractive", () => {
+  it("keeps the compact FITS upload panel informative and keyboard accessible", () => {
     render(<HomePage />);
 
-    const signalPanel = screen.getByRole("complementary", {
+    const signalPanel = screen.getByRole("button", {
       name: "从一张线性 FITS 开始",
     });
 
+    expect(signalPanel).toHaveAttribute("tabindex", "0");
     expect(within(signalPanel).queryByRole("link")).not.toBeInTheDocument();
     expect(within(signalPanel).getAllByText(/FITS/).length).toBeGreaterThan(0);
     expect(within(signalPanel).getByText("≤ 500 MB")).toBeInTheDocument();
