@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from software_guidance import get_software_guidance
+from target_guidance import get_target_guidance
 from report_zh import (
     REQUIRED_INFO,
     localized_evidence,
@@ -80,7 +81,7 @@ SOFTWARE_MAP = {
         "calibrate_integrate": "Use WBPP/SubframeSelector, inspect rejection maps, and integrate only accepted frames.",
         "crop_edges": "Use DynamicCrop on invalid registration borders before DBE/SPCC.",
         "background_review": "Use DBE/ABE only after validating samples and the background model against real sky structure.",
-        "color_calibration": "Solve the image and use SPCC with the actual camera/filter response when available.",
+        "color_calibration": "Solve the image and use SPCC with the actual camera/filter response if it is available.",
         "narrowband_mapping": "Use PixelMath/NarrowbandNormalization with a documented mapping; do not call it natural RGB.",
         "linear_denoise": "Use MLT/TGV or another linear method under a luminance/range mask.",
         "star_shape_review": "Use FWHMEccentricity/SubframeSelector and inspect spatial trends before deconvolution.",
@@ -261,13 +262,13 @@ def compile_advice(analysis, software="generic", target_type="unknown", target_n
         ),
         "Increase model complexity only when residuals show a coherent instrumental/sky gradient and the model remains free of target structure.",
         [
-            "The model contains only smooth unwanted background.",
-            "Corner differences improve without black pits or target-edge discontinuities.",
-            "Known nebula, dust, IFN, galaxy halo, and faint filaments retain their morphology.",
+            "背景模型只包含平滑的非目标低频成分。",
+            "四角差异改善，且没有黑坑或目标边缘断裂。",
+            "已知星云、尘埃、IFN、星系外晕和暗弱细丝保持原有形态。",
         ],
         [
-            "The model contains arcs, dust lanes, galaxy halo, IFN, or nebular filaments.",
-            "The corrected image develops dark wells, color discontinuities, or over-subtracted corners.",
+            "背景模型中出现弧形结构、尘埃带、星系外晕、IFN 或星云细丝。",
+            "校正后出现暗坑、颜色断层或四角过度扣除。",
         ],
         software,
         cautions=background_cautions,
@@ -457,6 +458,61 @@ def _payload(analysis, operations, software, target_type, target_name, filter_na
         required_info.append("Provide the target type to activate target-specific safety rules.")
     if not (filter_name or _get(analysis, "classification.filter")):
         required_info.append("Provide the filter or channel acquisition details.")
+
+    # Extract key analysis data for report rendering
+    analysis_summary = {
+        "statistics": {
+            "shape": _get(analysis, "statistics.shape"),
+            "min": _get(analysis, "statistics.min"),
+            "max": _get(analysis, "statistics.max"),
+            "mean": _get(analysis, "statistics.mean"),
+            "median": _get(analysis, "statistics.median"),
+            "p99": _get(analysis, "statistics.p99"),
+            "p99_9": _get(analysis, "statistics.p99_9"),
+        },
+        "background": {
+            "plane_magnitude": _get(analysis, "background.plane.magnitude_across_frame"),
+            "r_squared": _get(analysis, "background.plane.r_squared"),
+            "corner_ratio": _get(analysis, "background.corner_mean_over_center"),
+            "corner_range": _get(analysis, "background.corner_median_range"),
+        },
+        "noise": {
+            "sigma": _get(analysis, "noise.background_noise_sigma_normalized"),
+            "block_count": _get(analysis, "noise.block_count"),
+        },
+        "color": {
+            "channel_model": _get(analysis, "classification.channel_model"),
+            "background_medians": _get(analysis, "color.background_medians_normalized"),
+            "channel_p99": _get(analysis, "color.channel_p99_normalized"),
+            "correlation": _get(analysis, "color.channel_correlation"),
+        },
+        "stars": {
+            "usable_count": _get(analysis, "stars.usable_star_count"),
+            "fwhm": _get(analysis, "stars.fwhm_major_median_px"),
+            "eccentricity": _get(analysis, "stars.eccentricity_p90"),
+            "density": _get(analysis, "stars.density_per_megapixel"),
+        },
+        "clipping": {
+            "shadow": _get(analysis, "clipping.shadow_ratio_le_0_001"),
+            "highlight": _get(analysis, "clipping.highlight_ratio_ge_0_999"),
+            "exact_min": _get(analysis, "statistics.exact_min_ratio"),
+            "near_min": _get(analysis, "statistics.near_min_ratio"),
+        },
+        "file": {
+            "format": _get(analysis, "file.format"),
+            "header": {k: v for k, v in (analysis.get("file", {}).get("header", {}) or {}).items()
+                      if k in ["IMAGETYP", "FILTER", "EXPTIME", "NAXIS1", "NAXIS2", "NAXIS3", "XPIXSZ", "FOCALLEN", "INSTRUME", "OBJECT", "TELESCOP", "CCD-TEMP"]},
+        },
+        "classification": {
+            "frame_role": _get(analysis, "classification.frame_role"),
+            "processing_stage": _get(analysis, "classification.processing_stage"),
+            "transfer_state": _get(analysis, "classification.transfer_state"),
+            "channel_model": _get(analysis, "classification.channel_model"),
+            "filter": _get(analysis, "classification.filter"),
+            "object": _get(analysis, "classification.object"),
+        },
+    }
+
     return {
         "schema_version": SCHEMA_VERSION,
         "source_analysis_schema": analysis.get("schema_version"),
@@ -469,6 +525,7 @@ def _payload(analysis, operations, software, target_type, target_name, filter_na
         },
         "operations": operations,
         "required_information": required_info,
+        "analysis_summary": analysis_summary,
         "policy": {
             "exact_parameters_require_evidence": True,
             "background_correction_requires_visual_model_review": True,
@@ -504,97 +561,227 @@ def validate_advice(advice):
     return errors
 
 
+SIRIL_OPS = {"calibrate_integrate", "crop_edges", "background_review", "color_calibration", "narrowband_mapping", "controlled_stretch", "final_export"}
+PI_OPS = {"background_review", "color_calibration", "narrowband_mapping", "linear_denoise", "star_shape_review", "controlled_stretch", "highlight_protection", "star_treatment", "final_export"}
+PS_OPS = {"background_review", "color_calibration", "narrowband_mapping", "linear_denoise", "controlled_stretch", "highlight_protection", "star_treatment", "final_export"}
+
+SOFTWARE_DESC = {
+    "siril": "Siril 是天文摄影的入口工具，核心任务是从原始帧构建干净、可靠的叠加母版。",
+    "pixinsight": "PixInsight 是线性阶段处理的核心引擎，承担降噪、色彩校准、拉伸和细节增强的主要任务。",
+    "photoshop": "Photoshop 是非线性阶段的精修工具，负责最终调色、局部增强、星点处理和输出优化。",
+}
+
+SOFTWARE_FOCI = {
+    "siril": "叠加、校准、预处理",
+    "pixinsight": "降噪、色彩校准、拉伸、细节增强",
+    "photoshop": "最终调色、局部增强、星点处理、输出优化",
+}
+
+
+def _render_overall_section(context, analysis, guidance, active_ids, skip_ops, advice):
+    lines = []
+    lines.append("## 1. 整体后期处理建议")
+    lines.append("")
+
+    lines.append("### 数据评估")
+    cls = analysis.get("classification", {})
+    lines.append(f"- 帧角色：{localized_value(cls.get('frame_role', 'unknown'))}")
+    lines.append(f"- 处理阶段：{localized_value(cls.get('processing_stage', 'unknown'))}")
+    lines.append(f"- 转移状态：{localized_value(cls.get('transfer_state', 'unknown'))}")
+    lines.append(f"- 通道/滤镜模型：{localized_value(cls.get('channel_model', 'unknown'))} / {context.get('filter') or '未知'}")
+    lines.append(f"- 目标类型：{localized_value(context.get('target_type', 'unknown'))}")
+    if context.get("target_name"):
+        lines.append(f"- 目标名称：{context['target_name']}")
+    first_active = next(
+        (op for op in advice.get("operations", []) if op.get("decision") in {"recommend", "review"}),
+        None,
+    )
+    if first_active:
+        lines.append(f"- 置信度：{localized_value(first_active.get('confidence'))}")
+    lines.append(f"- 置信度与缺失信息：见文末补充信息")
+    lines.append("")
+
+    lines.append("### 测量文件事实")
+    lines.append("")
+    stats = analysis.get("statistics", {})
+    if stats.get("shape"):
+        lines.append(f"- 图像尺寸：{stats['shape']}")
+    if stats.get("min") is not None:
+        lines.append(f"- 最小值：{stats['min']:.6f}")
+    if stats.get("max") is not None:
+        lines.append(f"- 最大值：{stats['max']:.6f}")
+    if stats.get("mean") is not None:
+        lines.append(f"- 均值：{stats['mean']:.6f}")
+    if stats.get("median") is not None:
+        lines.append(f"- 中位数：{stats['median']:.6f}")
+    if stats.get("p99") is not None:
+        lines.append(f"- P99：{stats['p99']:.6f}")
+    if stats.get("p99_9") is not None:
+        lines.append(f"- P99.9：{stats['p99_9']:.6f}")
+
+    bg = analysis.get("background", {})
+    if bg.get("plane_magnitude") is not None:
+        lines.append(f"- 背景平面幅度：{bg['plane_magnitude']:.6f}")
+    if bg.get("r_squared") is not None:
+        lines.append(f"- 背景平面 R²：{bg['r_squared']:.6f}")
+
+    noise = analysis.get("noise", {})
+    if noise.get("sigma") is not None:
+        lines.append(f"- 背景噪声 sigma：{noise['sigma']:.6f}")
+
+    color = analysis.get("color", {})
+    if color.get("background_medians"):
+        lines.append(f"- 背景 RGB 中值：{color['background_medians']}")
+    if color.get("channel_p99"):
+        lines.append(f"- 通道 P99：{color['channel_p99']}")
+
+    stars = analysis.get("stars", {})
+    if stars.get("usable_count") is not None:
+        lines.append(f"- 可用星点数：{stars['usable_count']}")
+    if stars.get("fwhm") is not None:
+        lines.append(f"- 星点 FWHM：{stars['fwhm']:.2f} px")
+
+    clip = analysis.get("clipping", {})
+    if clip.get("highlight") is not None:
+        lines.append(f"- 接近饱和比例：{clip['highlight']:.4%}")
+    if clip.get("shadow") is not None:
+        lines.append(f"- 阴影裁切比例：{clip['shadow']:.4%}")
+    lines.append("")
+
+    lines.append("### 视觉发现")
+    lines.append("")
+    lines.append("[基于预览图像的描述]")
+    lines.append("")
+
+    lines.append("### 处理目标与风险")
+    lines.append("")
+    lines.append("**目标：** 在保留真实天文信号的前提下，进行可控拉伸、色彩处理和细节增强，获得结构清晰、色彩自然、噪声受控的图像。")
+    lines.append("")
+    lines.append("**针对该天体类型的关键保护：**")
+    for item in guidance["overall"]:
+        lines.append(f"- {item}")
+    lines.append("")
+    lines.append("**主要风险：**")
+    for item in guidance["overall_risks"]:
+        lines.append(f"- {item}")
+    lines.append("")
+
+    lines.append("### 推荐操作顺序")
+    lines.append("")
+    if active_ids:
+        lines.append(" → ".join(OPERATION_LABELS[item] for item in active_ids))
+    else:
+        lines.append("当前证据不足，无法建立可靠的后期处理顺序。")
+    lines.append("")
+
+    lines.append("### 问题表")
+    lines.append("")
+    lines.append("| 发现 | 证据 | 置信度 | 可能影响 | 需确认 |")
+    lines.append("|---|---|---:|---|---|")
+    for op in advice["operations"]:
+        if op["decision"] in {"recommend", "review"}:
+            ev_summary = " / ".join(f"{localized_evidence(e)}={localized_value(e.get('value'))}" for e in op["evidence"][:2])
+            lines.append(f"| {OPERATION_LABELS[op['id']]} | {ev_summary} | {localized_value(op['confidence'])} | {localized_operation(op)['purpose'][:40]}... | 见详细步骤 |")
+    lines.append("")
+
+    if skip_ops:
+        lines.append("### 当前不建议的操作")
+        lines.append("")
+        lines.append("| 操作 | 原因 |")
+        lines.append("|---|---|")
+        for op in skip_ops:
+            text = localized_operation(op)
+            lines.append(f"| {OPERATION_LABELS[op['id']]} | {text['purpose']} |")
+        lines.append("")
+
+    if advice["required_information"]:
+        lines.append("### 补充信息需求")
+        lines.append("")
+        for item in advice["required_information"]:
+            lines.append(f"- {REQUIRED_INFO.get(item, item)}")
+        lines.append("")
+
+    return lines
+
+
+def _render_software_section(software, guidance, ops_by_id, active_ids):
+    lines = []
+    idx = 2 + ["siril", "pixinsight", "photoshop"].index(software)
+    lines.append(f"## {idx}. {localized_value(software)} 软件的后期关键步骤")
+    lines.append("")
+    lines.append(f"> {SOFTWARE_DESC[software]} 针对该天体类型的重点关注：{SOFTWARE_FOCI[software]}。")
+    lines.append("")
+
+    lines.append(f"### 针对该天体类型的关键策略")
+    lines.append("")
+    for item in guidance[software]:
+        lines.append(f"- {item}")
+    lines.append("")
+
+    if software == "siril":
+        relevant = [op_id for op_id in active_ids if op_id in SIRIL_OPS]
+    elif software == "pixinsight":
+        relevant = [op_id for op_id in active_ids if op_id in PI_OPS]
+    else:
+        relevant = [op_id for op_id in active_ids if op_id in PS_OPS]
+
+    if relevant:
+        lines.append(f"### {localized_value(software)} 中的详细操作指引")
+        lines.append("")
+        for op_id in relevant:
+            op = ops_by_id[op_id]
+            text = localized_operation(op)
+            sw_guidance = get_software_guidance(software, op_id)
+
+            lines.append(f"#### {OPERATION_LABELS[op_id]}")
+            lines.append("")
+            lines.append(f"- 目的：{text['purpose']}")
+            lines.append(f"- 起始策略：{text['start']}")
+            lines.append(f"- 调整原则：{text['adjust']}")
+            lines.append("- 诊断证据：")
+            for ev in op["evidence"]:
+                lines.append(f"  - `{ev['path']}` = `{localized_value(ev.get('value'))}` — {localized_evidence(ev)}")
+            lines.append(f"- 软件处理方向：{SOFTWARE_MAP[software][op_id]}")
+            lines.append("- 关键工具：")
+            for item in sw_guidance["tools"]:
+                lines.append(f"  - {item}")
+            lines.append("- 操作步骤：")
+            for i, item in enumerate(sw_guidance["steps"], start=1):
+                lines.append(f"  {i}. {item}")
+            lines.append("- 参数选择依据：")
+            for item in sw_guidance["parameter_logic"]:
+                lines.append(f"  - {item}")
+            lines.append("- 蒙版与保护策略：")
+            for item in sw_guidance["mask_strategy"]:
+                lines.append(f"  - {item}")
+            lines.append("- 阶段验收：")
+            op_guidance = op.get("software_guidance", {})
+            for item in op_guidance.get("checkpoints", []):
+                lines.append(f"  - {item}")
+            lines.append("- 失败征象与回退：")
+            for item in op_guidance.get("failure_signs", []):
+                lines.append(f"  - {item}")
+            lines.append("")
+
+    return lines
+
+
 def render_markdown(advice):
     context = advice["context"]
-    lines = [
-        "# 深空天文后期处理建议",
-        "",
-        f"- 软件：{localized_value(context['software'])}",
-        f"- 目标类型：{localized_value(context['target_type'])}",
-        f"- 目标名称：{context.get('target_name') or '未知'}",
-        f"- 滤镜/通道：{context.get('filter') or '未知'}",
-        "",
-        "## 处理优先级",
-        "",
-    ]
-    recommended = [op["id"] for op in advice["operations"] if op["decision"] == "recommend"]
-    review = [op["id"] for op in advice["operations"] if op["decision"] == "review"]
-    skipped = [op["id"] for op in advice["operations"] if op["decision"] == "skip"]
-    lines.extend([
-        f"- 建议执行：{' → '.join(OPERATION_LABELS[item] for item in recommended) if recommended else '无'}",
-        f"- 需要确认：{'、'.join(OPERATION_LABELS[item] for item in review) if review else '无'}",
-        f"- 当前跳过：{'、'.join(OPERATION_LABELS[item] for item in skipped) if skipped else '无'}",
-        "",
-        "## 推荐顺序",
-        "",
-    ])
-    active = [op["id"] for op in advice["operations"] if op["decision"] in {"recommend", "review"}]
-    lines.append(
-        " → ".join(OPERATION_LABELS[item] for item in active)
-        if active else
-        "当前证据不足，无法建立可靠的后期处理顺序。"
-    )
-    if skipped:
-        lines.extend([
-            "",
-            "## 当前不建议的操作",
-            "",
-            "| 操作 | 原因 |",
-            "|---|---|",
-        ])
-    for op in advice["operations"]:
-        if op["decision"] == "skip":
-                text = localized_operation(op)
-                reason = text["start"].replace("|", "/")
-                lines.append(f"| {OPERATION_LABELS[op['id']]} | {reason} |")
-    for op in advice["operations"]:
-        if op["decision"] == "skip":
-            continue
-        text = localized_operation(op)
-        lines.extend([
-            "",
-            f"## {OPERATION_LABELS[op['id']]} — {DECISION_LABELS[op['decision']]}",
-            "",
-            f"- 置信度：{localized_value(op['confidence'])}",
-            f"- 目的：{text['purpose']}",
-            f"- 参数模式：{localized_value(op['parameter_mode'])}",
-            f"- 起始策略：{text['start']}",
-            f"- 调整原则：{text['adjust']}",
-            "- 诊断证据：",
-        ])
-        for evidence in op["evidence"]:
-            lines.append(
-                f"  - `{evidence['path']}` = `{localized_value(evidence.get('value'))}`"
-                f" — {localized_evidence(evidence)}"
-            )
-        guidance = localized_guidance(context["software"], op)
-        lines.extend([
-            f"- 软件处理方向：{text['software_action']}",
-            "- 关键工具/入口：",
-        ])
-        for item in guidance["tools"]:
-            lines.append(f"  - {item}")
-        lines.append("- 操作步骤：")
-        for index, item in enumerate(guidance["steps"], start=1):
-            lines.append(f"  {index}. {item}")
-        lines.append("- 参数选择依据：")
-        for item in guidance["parameter_logic"]:
-            lines.append(f"  - {item}")
-        lines.append("- 蒙版与保护策略：")
-        for item in guidance["mask_strategy"]:
-            lines.append(f"  - {item}")
-        lines.append("- 阶段验收：")
-        for item in guidance["checkpoints"]:
-            lines.append(f"  - {item}")
-        lines.append("- 失败征象与回退条件：")
-        for item in guidance["failure_signs"]:
-            lines.append(f"  - {item}")
-        if op["cautions"]:
-            lines.append("- 风险提示：")
-            lines.append("  - 当前数值指标只能用于定位风险，不能脱离原图、预览和目标类型直接解释为物理结论。")
-    if advice["required_information"]:
-        lines.extend(["", "## 仍需补充的信息", ""])
-        lines.extend(f"- {REQUIRED_INFO.get(item, item)}" for item in advice["required_information"])
+    target_type = context.get("target_type", "unknown")
+    operations = advice.get("operations", [])
+    analysis = advice.get("analysis_summary", {})
+    guidance = get_target_guidance(target_type)
+
+    ops_by_id = {op["id"]: op for op in operations}
+    active_ids = [op["id"] for op in operations if op["decision"] in {"recommend", "review"}]
+    skip_ops = [op for op in operations if op["decision"] == "skip"]
+
+    lines = ["# 深空天体后期处理建议", ""]
+    lines.extend(_render_overall_section(context, analysis, guidance, active_ids, skip_ops, advice))
+    lines.extend(_render_software_section("siril", guidance, ops_by_id, active_ids))
+    lines.extend(_render_software_section("pixinsight", guidance, ops_by_id, active_ids))
+    lines.extend(_render_software_section("photoshop", guidance, ops_by_id, active_ids))
     return "\n".join(lines) + "\n"
 
 

@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +20,7 @@ def load_module(name, path):
 
 analyzer = load_module("advisor_analyzer_e2e", ROOT / "scripts" / "analyze_file.py")
 advisor = load_module("advisor_generator_e2e", ROOT / "scripts" / "generate_advice.py")
+starun_runner = load_module("advisor_starun_runner_e2e", ROOT / "scripts" / "run_starun_analysis.py")
 
 
 class EndToEndTests(unittest.TestCase):
@@ -55,6 +57,53 @@ class EndToEndTests(unittest.TestCase):
             self.assertIn("narrowband_mapping", operations)
             self.assertNotIn("color_calibration", operations)
             self.assertEqual(advice["source_analysis_schema"], "2.0")
+
+    def test_starun_entrypoint_writes_sdk_result_and_artifacts(self):
+        height, width = 120, 160
+        yy, xx = np.mgrid[0:height, 0:width]
+        mono = 0.05 + 0.05 * xx / width
+        for y, x in ((35, 40), (70, 90), (95, 135)):
+            mono += 0.6 * np.exp(-0.5 * (((xx - x) / 1.8) ** 2 + ((yy - y) / 1.7) ** 2))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            input_dir.mkdir()
+            input_path = input_dir / "source.fits"
+            hdu = fits.PrimaryHDU(mono.astype(np.float32))
+            hdu.header["OBJECT"] = "M31"
+            hdu.header["NCOMBINE"] = 24
+            hdu.writeto(input_path)
+            (input_dir / "request.json").write_text(
+                '{"source_path":"input/source.fits"}',
+                encoding="utf-8",
+            )
+
+            result_path = output_dir / "analysis-result.json"
+            code = starun_runner.main([
+                "--source", str(input_path),
+                "--output-dir", str(output_dir),
+                "--result", str(result_path),
+                "--request-json", str(input_dir / "request.json"),
+            ])
+
+            self.assertEqual(code, 0)
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            self.assertEqual(result["schema_version"], "starun.skill-result/v1")
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(result["preview"]["artifact"], "analysis-preview.png")
+            self.assertEqual(
+                result["artifacts"],
+                [
+                    {"name": "analysis-report.json", "media_type": "application/json"},
+                    {"name": "analysis-preview.png", "media_type": "image/png"},
+                ],
+            )
+            self.assertTrue((output_dir / "analysis-report.json").exists())
+            self.assertTrue((output_dir / "analysis-preview.png").exists())
+            self.assertTrue((output_dir / "analysis-processing-report.md").exists())
+            self.assertGreaterEqual(len(result["analysis"]["workflow"]), 4)
 
 
 if __name__ == "__main__":

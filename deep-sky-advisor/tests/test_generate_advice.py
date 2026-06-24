@@ -162,11 +162,11 @@ class GenerateAdviceTests(unittest.TestCase):
             self.assertTrue(advice_path.exists())
             self.assertTrue(report_path.exists())
             report = report_path.read_text(encoding="utf-8")
-            self.assertIn("处理优先级", report)
-            self.assertIn("关键工具/入口", report)
+            self.assertIn("推荐操作顺序", report)
+            self.assertIn("关键工具", report)
             self.assertIn("操作步骤", report)
             self.assertIn("阶段验收", report)
-            self.assertIn("失败征象与回退条件", report)
+            self.assertIn("失败征象与回退", report)
 
     def test_software_outputs_are_specific(self):
         expected = {

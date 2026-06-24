@@ -7,6 +7,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Starun exposes a fixed runtime through the workspace python wrapper.
 if [[ "${STARUN_SKILL_SANDBOX:-}" == "1" ]]; then
+    if [[ "$#" -lt 2 ]]; then
+        echo "run_analysis.sh requires an explicit output directory inside the Starun skill sandbox." >&2
+        exit 2
+    fi
     exec python "$SCRIPT_DIR/analyze_file.py" "$@"
 fi
 

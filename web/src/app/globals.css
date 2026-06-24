@@ -1958,7 +1958,7 @@ progress::-moz-progress-bar {
 }
 
 .analysis-issue-list h4,
-.analysis-workflow h4 {
+.analysis-workflow h5 {
   margin: 0;
 }
 
@@ -1986,10 +1986,34 @@ progress::-moz-progress-bar {
   line-height: 1.6;
 }
 
+.analysis-workflow-groups {
+  display: grid;
+  gap: 1rem;
+}
+
+.analysis-workflow-group {
+  border: 1px solid var(--color-space-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  padding: 1rem;
+}
+
+.analysis-workflow-group h4 {
+  margin: 0 0 0.85rem;
+  font-size: 0.95rem;
+}
+
+.analysis-workflow-software-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
 .analysis-workflow {
   display: grid;
   gap: 0.75rem;
   padding-left: 1.5rem;
+  margin: 0;
 }
 
 .analysis-workflow li {
@@ -2591,6 +2615,10 @@ progress::-moz-progress-bar {
   }
 
   .analysis-preview-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .analysis-workflow-software-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -3420,4 +3448,3 @@ div[data-tooltip]:focus-visible {
     background: var(--color-space-accent);
   }
 }
-

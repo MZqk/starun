@@ -411,6 +411,90 @@ describe("Task 11 flows", () => {
     expect(analysisSource).toContain("zhCN.task11.analysis");
   });
 
+  it("splits analysis advice into general, Siril, PixInsight, and Photoshop sections", async () => {
+    window.history.replaceState({}, "", "/analysis?task=analysis-advice");
+    await new TaskHistoryRepository().upsert({
+      taskId: "analysis-advice",
+      type: "analysis",
+      fileName: "m42.fits",
+      lastStatus: "completed",
+      createdAt: "2026-06-14T09:00:00Z",
+      expiresAt: "2036-06-15T11:00:00Z",
+      resultAvailable: true,
+    });
+    api.getTask.mockResolvedValue(
+      taskDetail({
+        id: "analysis-advice",
+        status: "completed",
+        expires_at: "2036-06-15T11:00:00Z",
+        result: {
+          manifest_available: true,
+          summary: {
+            model: "kimi-k2.6",
+            analysis: {
+              overview: "整体可进入后期，但需要保护星云弱信号。",
+              image_quality: {
+                rating: "good",
+                summary: "背景较干净，核心区域动态范围较高。",
+                confidence: 0.82,
+              },
+              observations: {
+                target: "目标居中。",
+                background: "轻微梯度。",
+                stars: "星点基本圆。",
+                noise: "暗部噪声可控。",
+                color: "整体偏暖。",
+              },
+              issues: [],
+              workflow: [
+                {
+                  order: 1,
+                  step: "数据阶段与通用策略",
+                  purpose: "先确认数据阶段和目标类型。",
+                  guidance: "保护真实弱信号，避免过度背景提取。",
+                },
+                {
+                  order: 2,
+                  step: "Siril 校准与叠加",
+                  purpose: "建立干净的集成母版。",
+                  guidance: "在 Siril 中检查序列、剔除异常子帧并导出母版。",
+                },
+                {
+                  order: 3,
+                  step: "PixInsight 线性处理",
+                  purpose: "完成背景、校色、降噪与拉伸。",
+                  guidance: "在 PixInsight 中使用受控拉伸并保护星云结构。",
+                },
+                {
+                  order: 4,
+                  step: "Photoshop 最终润色",
+                  purpose: "完成非线性阶段的局部调整与输出。",
+                  guidance: "在 Photoshop 中使用可逆调整图层输出成片。",
+                },
+              ],
+              caveats: ["显示预览不等同于线性数据。"],
+              preview_metadata: {},
+            },
+          },
+          artifacts: [],
+        },
+      }),
+    );
+
+    render(<AnalysisPage />);
+
+    expect(
+      await screen.findByRole("heading", { name: "专业解读与后期建议" }),
+    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "深空天体后期处理建议" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Siril 软件的后期关键步骤" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "PixInsight 软件的后期关键步骤" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Photoshop 软件的后期关键步骤" })).toBeVisible();
+    expect(screen.getByText("在 Siril 中检查序列、剔除异常子帧并导出母版。")).toBeVisible();
+    expect(screen.getByText("在 PixInsight 中使用受控拉伸并保护星云结构。")).toBeVisible();
+    expect(screen.getByText("在 Photoshop 中使用可逆调整图层输出成片。")).toBeVisible();
+  });
+
   it("requires exactly one processing style and defaults to balanced", async () => {
     const user = userEvent.setup();
     render(<ProcessingPage />);

@@ -54,6 +54,39 @@ const OBSERVATION_EXPLANATIONS: Record<string, string> = {
   "色彩": "通过恒星色彩校准 (PCC) 指标，分析红绿蓝通道的平衡及发射星云的色彩表现。"
 };
 
+type WorkflowGroupKey = "general" | "siril" | "pixinsight" | "photoshop";
+
+function classifyWorkflowStep(step: Record<string, unknown>): WorkflowGroupKey {
+  const haystack = [
+    asString(step.step),
+    asString(step.purpose),
+    asString(step.guidance),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (haystack.includes("photoshop")) return "photoshop";
+  if (haystack.includes("pixinsight")) return "pixinsight";
+  if (haystack.includes("siril")) return "siril";
+  return "general";
+}
+
+function groupWorkflowSteps(workflow: Record<string, unknown>[]) {
+  return workflow.reduce<Record<WorkflowGroupKey, Record<string, unknown>[]>>(
+    (groups, step) => {
+      groups[classifyWorkflowStep(step)].push(step);
+      return groups;
+    },
+    {
+      general: [],
+      siril: [],
+      pixinsight: [],
+      photoshop: [],
+    },
+  );
+}
+
 function renderConfidenceGauge(confidence: number): string {
   const filledCount = Math.round(confidence * 10);
   const emptyCount = 10 - filledCount;
@@ -263,6 +296,7 @@ export default function AnalysisPage() {
   const observations = asRecord(analysis?.observations);
   const issues = asRecordList(analysis?.issues);
   const workflow = asRecordList(analysis?.workflow);
+  const workflowGroups = groupWorkflowSteps(workflow);
   const caveats = asStringList(analysis?.caveats);
   const sourceValid =
     task?.status === "completed" &&
@@ -598,15 +632,58 @@ export default function AnalysisPage() {
             {workflow.length > 0 ? (
               <section className="analysis-section">
                 <h3>{copy.workflowTitle}</h3>
-                <ol className="analysis-workflow">
-                  {workflow.map((step, index) => (
-                    <li key={`${asString(step.step)}-${index}`}>
-                      <h4>{asString(step.step)}</h4>
-                      <p>{asString(step.purpose)}</p>
-                      <strong>{asString(step.guidance)}</strong>
-                    </li>
-                  ))}
-                </ol>
+                <div className="analysis-workflow-groups">
+                  {workflowGroups.general.length > 0 ? (
+                    <section className="analysis-workflow-group">
+                      <h4>{copy.workflowGroupTitles.general}</h4>
+                      <ol className="analysis-workflow">
+                        {workflowGroups.general.map((step, index) => (
+                          <li key={`${asString(step.step)}-${index}`}>
+                            <h5>{asString(step.step)}</h5>
+                            <p>{asString(step.purpose)}</p>
+                            <strong>{asString(step.guidance)}</strong>
+                          </li>
+                        ))}
+                      </ol>
+                    </section>
+                  ) : null}
+
+                  {workflowGroups.siril.length > 0 || workflowGroups.pixinsight.length > 0 ? (
+                    <div className="analysis-workflow-software-grid">
+                      {(["siril", "pixinsight"] as const).map((group) =>
+                        workflowGroups[group].length > 0 ? (
+                          <section className="analysis-workflow-group" key={group}>
+                            <h4>{copy.workflowGroupTitles[group]}</h4>
+                            <ol className="analysis-workflow">
+                              {workflowGroups[group].map((step, index) => (
+                                <li key={`${asString(step.step)}-${index}`}>
+                                  <h5>{asString(step.step)}</h5>
+                                  <p>{asString(step.purpose)}</p>
+                                  <strong>{asString(step.guidance)}</strong>
+                                </li>
+                              ))}
+                            </ol>
+                          </section>
+                        ) : null,
+                      )}
+                    </div>
+                  ) : null}
+
+                  {workflowGroups.photoshop.length > 0 ? (
+                    <section className="analysis-workflow-group">
+                      <h4>{copy.workflowGroupTitles.photoshop}</h4>
+                      <ol className="analysis-workflow">
+                        {workflowGroups.photoshop.map((step, index) => (
+                          <li key={`${asString(step.step)}-${index}`}>
+                            <h5>{asString(step.step)}</h5>
+                            <p>{asString(step.purpose)}</p>
+                            <strong>{asString(step.guidance)}</strong>
+                          </li>
+                        ))}
+                      </ol>
+                    </section>
+                  ) : null}
+                </div>
               </section>
             ) : null}
 

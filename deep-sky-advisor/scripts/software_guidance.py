@@ -213,7 +213,7 @@ OVERRIDES = {
             ],
         },
         "background_review": {
-            "tools": ["DynamicCrop", "DynamicBackgroundExtraction", "AutomaticBackgroundExtractor", "Generated background model"],
+            "tools": ["DynamicCrop", "DynamicBackgroundExtraction", "AutomaticBackgroundExtractor", "生成的背景模型"],
             "steps": [
                 "DynamicCrop invalid borders first.",
                 "Use DBE for controlled manual sampling; reserve ABE for simple fields and always inspect its model.",
@@ -228,7 +228,7 @@ OVERRIDES = {
         "color_calibration": {
             "tools": ["ImageSolver", "SpectrophotometricColorCalibration", "BackgroundNeutralization only when justified"],
             "steps": [
-                "Solve the linear image and confirm WCS.",
+                "使用 ImageSolver 确认 WCS。",
                 "Select the actual or justified camera/filter response in SPCC.",
                 "Use unsaturated isolated stars and inspect the fit.",
                 "Treat residual background gradients separately; do not force real emission neutral.",
@@ -244,7 +244,7 @@ OVERRIDES = {
             ],
         },
         "linear_denoise": {
-            "tools": ["MultiscaleLinearTransform", "TGVDenoise", "NoiseXTerminator when available", "RangeSelection mask"],
+            "tools": ["MultiscaleLinearTransform", "TGVDenoise", "NoiseXTerminator（已安装时）", "RangeSelection mask"],
             "steps": [
                 "Build a mask that protects high-SNR target structure and stars.",
                 "With MLT, target measured small-scale noise first; with TGV, protect edges and avoid excessive iterations.",
@@ -277,7 +277,7 @@ OVERRIDES = {
             ],
         },
         "star_treatment": {
-            "tools": ["StarNet", "StarXTerminator when available", "MorphologicalTransformation", "PixelMath recomposition"],
+            "tools": ["StarNet", "StarXTerminator（已安装时）", "MorphologicalTransformation", "PixelMath recomposition"],
             "steps": [
                 "Generate starless and star layers and inspect residuals before processing either layer.",
                 "Use MorphologicalTransformation with Selection/Amount rather than full-strength erosion.",

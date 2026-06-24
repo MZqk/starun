@@ -225,6 +225,12 @@ export const zhCN = {
         high: "高",
       } as Record<string, string>,
       workflowTitle: "建议处理流程",
+      workflowGroupTitles: {
+        general: "深空天体后期处理建议",
+        siril: "Siril 软件的后期关键步骤",
+        pixinsight: "PixInsight 软件的后期关键步骤",
+        photoshop: "Photoshop 软件的后期关键步骤",
+      } as Record<string, string>,
       caveatsTitle: "限制与不确定性",
       continueKicker: "继续工作流",
       sourceValid: "源文件仍在有效期内",
