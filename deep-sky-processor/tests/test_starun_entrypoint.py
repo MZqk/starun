@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -29,6 +30,29 @@ starun_processing = load_module(
 
 
 class StarunProcessingEntrypointTests(unittest.TestCase):
+    def test_entrypoint_resolves_parent_relative_output_inside_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_dir = root / "input"
+            skill_dir = root / ".agents" / "deep-sky-processor"
+            output_dir = root / "output"
+            input_dir.mkdir()
+            skill_dir.mkdir(parents=True)
+            output_dir.mkdir()
+            (input_dir / "request.json").write_text("{}", encoding="utf-8")
+
+            previous_cwd = Path.cwd()
+            try:
+                os.chdir(skill_dir)
+                resolved = starun_processing._sandbox_path("../../output/processing-result.json")
+            finally:
+                os.chdir(previous_cwd)
+
+            self.assertEqual(
+                resolved.resolve(),
+                (output_dir / "processing-result.json").resolve(),
+            )
+
     def test_balanced_entrypoint_writes_sdk_result_and_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

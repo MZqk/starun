@@ -28,9 +28,18 @@ def _workspace_root():
 
 def _sandbox_path(value):
     path = Path(value)
-    if path.is_absolute() or path.exists():
+    if path.is_absolute():
         return path
-    return _workspace_root() / path
+    workspace = _workspace_root()
+    cwd_relative = (Path.cwd() / path).resolve()
+    try:
+        cwd_relative.relative_to(workspace.resolve())
+        return cwd_relative
+    except ValueError:
+        pass
+    if path.exists():
+        return path
+    return workspace / path
 
 
 def _as_float(value, default=0.0):

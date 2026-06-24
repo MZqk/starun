@@ -16,9 +16,9 @@ from agents.exceptions import (
     OutputGuardrailTripwireTriggered,
     UserError,
 )
+from agents.sandbox.errors import WorkspaceReadNotFoundError
 from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 
-from app.agent_sdk.agents import build_analysis_agent, build_processing_agent
 from app.agent_sdk.artifacts import publish_claimed_artifacts
 from app.agent_sdk.contracts import (
     AnalysisSkillResult,
@@ -37,7 +37,11 @@ from app.agent_sdk.errors import (
 )
 from app.artifacts.contracts import JsonValue
 from app.agent_sdk.providers import build_agent_model
-from app.agent_sdk.runtime import DirectProcessingSkillRuntime, OpenAiSandboxRuntime
+from app.agent_sdk.runtime import (
+    DirectAnalysisSkillRuntime,
+    DirectProcessingSkillRuntime,
+    OpenAiSandboxRuntime,
+)
 from app.agent_sdk.runtime_types import AgentSdkRunSpec, AgentSdkRuntime
 from app.agent_sdk.workspaces import SkillDefinition, build_task_manifest
 from app.artifacts.store import ArtifactStore
@@ -106,16 +110,15 @@ class AgentSdkBridge:
             request=request,
         )
         skill = SkillDefinition("deep-sky-advisor", self._settings.analysis_skill_path)
-        agent = build_analysis_agent(build_agent_model(self._settings), skill, manifest)
         return AgentSdkRunSpec(
             task_id=task_id,
             task_type=TaskType.ANALYSIS,
             style=None,
-            agent_name=agent.name,
+            agent_name="Starun Professional Analysis",
             skill_name=skill.name,
             result_path="output/analysis-result.json",
             max_turns=self._settings.agent_max_turns,
-            agent=agent,
+            agent=None,
             manifest=manifest,
             input_text=(
                 "读取 input/request.json，使用 deep-sky-advisor skill 完成专业分析，"
@@ -159,13 +162,17 @@ class AgentSdkBridge:
                 "deep-sky-processor",
                 self._settings.processing_skill_path,
             )
-            agent = build_processing_agent(model, skill, manifest, style)
+            agent = None
             skill_name = skill.name
         return AgentSdkRunSpec(
             task_id=task_id,
             task_type=TaskType.PROCESSING,
             style=style,
-            agent_name=agent.name,
+            agent_name=(
+                agent.name
+                if agent is not None
+                else "Starun AI Processing"
+            ),
             skill_name=skill_name,
             result_path="output/processing-result.json",
             max_turns=self._settings.agent_max_turns,
@@ -249,6 +256,8 @@ class AgentSdkBridge:
             await runtime.delete()
 
     def _default_runtime(self, spec: AgentSdkRunSpec) -> AgentSdkRuntime:
+        if spec.task_type is TaskType.ANALYSIS:
+            return DirectAnalysisSkillRuntime(spec)
         if spec.task_type is TaskType.PROCESSING and spec.style is not ProcessingStyle.ARTISTIC:
             return DirectProcessingSkillRuntime(spec)
         return OpenAiSandboxRuntime(spec)
@@ -545,16 +554,43 @@ class AgentSdkBridge:
         artifact_store: ArtifactStore,
     ) -> PublishedSkillRun:
         try:
+            logger.debug(
+                "Reading skill result: task_id=%s task_type=%s skill=%s result_path=%s",
+                spec.task_id,
+                spec.task_type.value,
+                spec.skill_name,
+                spec.result_path,
+            )
             raw = await runtime.read_bytes(spec.result_path)
-        except FileNotFoundError as exc:
+        except (FileNotFoundError, WorkspaceReadNotFoundError) as exc:
+            logger.debug(
+                "Skill result file is missing: task_id=%s skill=%s result_path=%s error=%s",
+                spec.task_id,
+                spec.skill_name,
+                spec.result_path,
+                exc,
+            )
             raise SkillExecutionError(
                 "Skill did not write its result file.",
                 code="skill_output_missing",
             ) from exc
+        logger.debug(
+            "Read skill result: task_id=%s skill=%s bytes=%s",
+            spec.task_id,
+            spec.skill_name,
+            len(raw),
+        )
         if len(raw) > 64 * 1024:
             raise SkillOutputError("Skill result exceeds 64 KiB.")
         try:
             decoded = json.loads(raw)
+            logger.debug(
+                "Decoded skill result: task_id=%s skill=%s status=%s keys=%s",
+                spec.task_id,
+                spec.skill_name,
+                decoded.get("status") if isinstance(decoded, dict) else None,
+                sorted(decoded) if isinstance(decoded, dict) else type(decoded).__name__,
+            )
             if isinstance(decoded, dict) and decoded.get("status") == "failed":
                 failure = SkillFailureResult.model_validate(decoded, strict=True)
                 missing = (

@@ -262,6 +262,16 @@ class SerialTaskExecutor:
             raise
         except Exception:
             diagnostic_id = secrets.token_hex(12)
+            if logger.isEnabledFor(logging.DEBUG):
+                context = self._get_task(task_id)
+                logger.debug(
+                    "Task failure context: task_id=%s diagnostic_id=%s task_type=%s status=%s upload_id=%s",
+                    task_id,
+                    diagnostic_id,
+                    context.type.value if context is not None else None,
+                    context.status.value if context is not None else None,
+                    context.upload_id if context is not None else None,
+                )
             logger.exception("Task %s failed; diagnostic_id=%s", task_id, diagnostic_id)
             await self._retry_database_operation(
                 lambda: self._finish_failed(

@@ -6,10 +6,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from agents.sandbox import Dir, LocalFile, Manifest
-from agents.sandbox.capabilities import Shell, Skills
-from agents.sandbox.capabilities.shell import ShellToolSet
-from agents.sandbox.capabilities.tools.shell_tool import ExecCommandArgs, ExecCommandTool
-from agents.sandbox.entries import File, LocalDir
+from agents.sandbox.entries import File
 from agents.sandbox.manifest import Environment
 from agents.sandbox.types import Permissions
 from agents.sandbox.workspace_paths import SandboxPathGrant
@@ -39,20 +36,6 @@ REQUIRED_SKILL_RUNTIME_MODULES = (
     "tifffile",
     "xisf",
 )
-
-
-DEFAULT_EXEC_YIELD_MS = 30_000
-
-
-class StarunExecCommandTool(ExecCommandTool):
-    async def run(self, args: ExecCommandArgs) -> str:
-        return await super().run(
-            args.model_copy(update={"tty": True, "yield_time_ms": DEFAULT_EXEC_YIELD_MS})
-        )
-
-
-def _configure_shell_tools(toolset: ShellToolSet) -> None:
-    toolset.exec_command = StarunExecCommandTool(session=toolset.exec_command.session)
 
 
 def build_task_manifest(
@@ -197,20 +180,3 @@ def build_task_manifest(
             "output": Dir(children={}),
         }
     )
-
-
-def build_skill_capabilities(skill: SkillDefinition) -> list[Shell | Skills]:
-    if not skill.path.is_dir():
-        raise AgentNotConfiguredError(
-            f"Configured skill directory is missing: {skill.name}"
-        )
-    return [
-        Shell(configure_tools=_configure_shell_tools),
-        Skills(
-            from_=Dir(
-                children={
-                    skill.name: LocalDir(src=skill.path),
-                }
-            )
-        ),
-    ]

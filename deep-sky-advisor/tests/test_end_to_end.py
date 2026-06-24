@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -28,6 +29,29 @@ starun_runner = load_module("advisor_starun_runner_e2e", ROOT / "scripts" / "run
 
 
 class EndToEndTests(unittest.TestCase):
+    def test_starun_entrypoint_resolves_parent_relative_output_inside_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_dir = root / "input"
+            skill_dir = root / ".agents" / "deep-sky-advisor"
+            output_dir = root / "output"
+            input_dir.mkdir()
+            skill_dir.mkdir(parents=True)
+            output_dir.mkdir()
+            (input_dir / "request.json").write_text("{}", encoding="utf-8")
+
+            previous_cwd = Path.cwd()
+            try:
+                os.chdir(skill_dir)
+                resolved = starun_runner._sandbox_path("../../output/analysis-result.json")
+            finally:
+                os.chdir(previous_cwd)
+
+            self.assertEqual(
+                resolved.resolve(),
+                (output_dir / "analysis-result.json").resolve(),
+            )
+
     def test_analysis_to_audited_advice(self):
         height, width = 160, 220
         yy, xx = np.mgrid[0:height, 0:width]

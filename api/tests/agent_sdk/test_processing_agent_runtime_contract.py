@@ -1,14 +1,16 @@
-from app.agent_sdk.agents import (
-    BALANCED_PROCESSING_INSTRUCTIONS,
-    PROCESSING_BASE_INSTRUCTIONS,
-    REALISTIC_PROCESSING_INSTRUCTIONS,
-)
 from app.agent_sdk.bridge import AgentSdkBridge
-from app.agent_sdk.runtime import DirectProcessingSkillRuntime, _processing_entrypoint_command
-from app.agent_sdk.workspaces import DEFAULT_EXEC_YIELD_MS
+from app.agent_sdk import runtime as runtime_module
+from app.agent_sdk.runtime import (
+    DirectAnalysisSkillRuntime,
+    DirectProcessingSkillRuntime,
+    _analysis_entrypoint_command,
+    _processing_entrypoint_command,
+)
 from app.config import Settings
 from app.db.models import ProcessingStyle
 from app.fits.schemas import BasicStatistics, FitsInspection, HduSummary
+import pytest
+from agents.sandbox.types import ExecResult
 
 
 def _inspection() -> FitsInspection:
@@ -34,24 +36,6 @@ def _inspection() -> FitsInspection:
         ),
         header={},
     )
-
-
-def test_processing_instructions_pin_skill_path_and_avoid_sandbox_exploration() -> None:
-    assert ".agents/deep-sky-processor/" in PROCESSING_BASE_INSTRUCTIONS
-    assert "不要通过 find" in PROCESSING_BASE_INSTRUCTIONS
-    assert "scripts/run_starun_processing.py" in PROCESSING_BASE_INSTRUCTIONS
-    assert "--result ../../output/processing-result.json" in PROCESSING_BASE_INSTRUCTIONS
-
-
-def test_processing_style_instructions_delegate_to_starun_entrypoint() -> None:
-    assert "run_starun_processing.py" in REALISTIC_PROCESSING_INSTRUCTIONS
-    assert "run_starun_processing.py" in BALANCED_PROCESSING_INSTRUCTIONS
-    assert "python scripts/pipeline.py" not in REALISTIC_PROCESSING_INSTRUCTIONS
-    assert "python scripts/pipeline.py" not in BALANCED_PROCESSING_INSTRUCTIONS
-
-
-def test_exec_command_yields_quickly_for_long_running_pty_commands() -> None:
-    assert DEFAULT_EXEC_YIELD_MS == 30_000
 
 
 def test_agent_max_turns_caps_env_override_above_hard_limit() -> None:
@@ -81,6 +65,27 @@ def test_realistic_processing_uses_direct_skill_runtime(tmp_path) -> None:
     assert spec.skill_path == settings.processing_skill_path
 
 
+def test_analysis_uses_direct_skill_runtime(tmp_path) -> None:
+    source = tmp_path / "source.fits"
+    source.write_bytes(b"fits")
+    settings = Settings(
+        _env_file=None,
+        ai_api_key="test-key",
+        analysis_skill_path=tmp_path / "deep-sky-advisor",
+    )
+    settings.analysis_skill_path.mkdir()
+    bridge = AgentSdkBridge(settings)
+
+    spec = bridge.build_analysis_spec(
+        task_id="analysis-1",
+        source_path=source,
+        inspection=_inspection(),
+    )
+
+    assert isinstance(bridge._default_runtime(spec), DirectAnalysisSkillRuntime)
+    assert spec.skill_path == settings.analysis_skill_path
+
+
 def test_direct_processing_runtime_command_targets_starun_entrypoint(tmp_path) -> None:
     source = tmp_path / "source.xisf"
     source.write_bytes(b"xisf")
@@ -102,3 +107,106 @@ def test_direct_processing_runtime_command_targets_starun_entrypoint(tmp_path) -
     assert "scripts/run_starun_processing.py" in command
     assert "../../input/source.xisf" in command
     assert "Runner.run" not in command
+
+
+def test_direct_analysis_runtime_command_targets_starun_entrypoint(tmp_path) -> None:
+    source = tmp_path / "source.xisf"
+    source.write_bytes(b"xisf")
+    settings = Settings(
+        _env_file=None,
+        ai_api_key="test-key",
+        analysis_skill_path=tmp_path / "deep-sky-advisor",
+    )
+    settings.analysis_skill_path.mkdir()
+    spec = AgentSdkBridge(settings).build_analysis_spec(
+        task_id="analysis-2",
+        source_path=source,
+        inspection=_inspection().model_copy(update={"format": "xisf"}),
+    )
+
+    command = _analysis_entrypoint_command(spec)
+
+    assert "scripts/run_starun_analysis.py" in command
+    assert "../../input/source.xisf" in command
+    assert "Runner.run" not in command
+
+
+@pytest.mark.asyncio
+async def test_direct_processing_runtime_starts_session_before_exec(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "source.fits"
+    source.write_bytes(b"fits")
+    settings = Settings(
+        _env_file=None,
+        ai_api_key="test-key",
+        processing_skill_path=tmp_path / "deep-sky-processor",
+    )
+    settings.processing_skill_path.mkdir()
+    spec = AgentSdkBridge(settings).build_processing_spec(
+        task_id="task-3",
+        source_path=source,
+        inspection=_inspection(),
+        style=ProcessingStyle.REALISTIC,
+    )
+    calls: list[str] = []
+
+    class FakeSession:
+        async def start(self):
+            calls.append("start")
+
+        async def exec(self, *_args, **_kwargs):
+            calls.append("exec")
+            return ExecResult(stdout=b"", stderr=b"", exit_code=0)
+
+    class FakeClient:
+        async def create(self, *, manifest):
+            calls.append("create")
+            return FakeSession()
+
+    monkeypatch.setattr(runtime_module, "UnixLocalSandboxClient", lambda: FakeClient())
+
+    async def emit(_event_type, _payload):
+        return None
+
+    await DirectProcessingSkillRuntime(spec).run(spec, emit)
+
+    assert calls[:3] == ["create", "start", "exec"]
+
+
+@pytest.mark.asyncio
+async def test_direct_analysis_runtime_starts_session_before_exec(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "source.fits"
+    source.write_bytes(b"fits")
+    settings = Settings(
+        _env_file=None,
+        ai_api_key="test-key",
+        analysis_skill_path=tmp_path / "deep-sky-advisor",
+    )
+    settings.analysis_skill_path.mkdir()
+    spec = AgentSdkBridge(settings).build_analysis_spec(
+        task_id="analysis-3",
+        source_path=source,
+        inspection=_inspection(),
+    )
+    calls: list[str] = []
+
+    class FakeSession:
+        async def start(self):
+            calls.append("start")
+
+        async def exec(self, *_args, **_kwargs):
+            calls.append("exec")
+            return ExecResult(stdout=b"", stderr=b"", exit_code=0)
+
+    class FakeClient:
+        async def create(self, *, manifest):
+            calls.append("create")
+            return FakeSession()
+
+    monkeypatch.setattr(runtime_module, "UnixLocalSandboxClient", lambda: FakeClient())
+
+    async def emit(_event_type, _payload):
+        return None
+
+    await DirectAnalysisSkillRuntime(spec).run(spec, emit)
+
+    assert calls[:3] == ["create", "start", "exec"]
