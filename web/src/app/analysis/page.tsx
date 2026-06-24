@@ -300,45 +300,7 @@ export default function AnalysisPage() {
     };
   }, [copy.previewError, previewName, taskId]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const activeEl = document.activeElement;
-      const isEditable =
-        activeEl &&
-        (activeEl.tagName === "INPUT" ||
-          activeEl.tagName === "TEXTAREA" ||
-          activeEl.getAttribute("contenteditable") === "true");
-      if (isEditable) return;
 
-      if (event.key === "Enter" && !taskId && upload && !creating) {
-        event.preventDefault();
-        void createTask();
-      }
-
-      const isActiveTask = task && ["queued", "running"].includes(task.status);
-      if (event.key === "Escape" && taskId && isActiveTask && !cancelling) {
-        event.preventDefault();
-        void cancelTask();
-      }
-
-      if ((event.key === "p" || event.key === "P") && sourceValid && taskId) {
-        event.preventDefault();
-        window.location.href = `/processing?source_task_id=${encodeURIComponent(taskId)}`;
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [
-    taskId,
-    upload,
-    creating,
-    task,
-    cancelling,
-    sourceValid,
-    createTask,
-    cancelTask,
-  ]);
 
   const activePreview =
     preview?.taskId === taskId ? preview : null;
@@ -363,11 +325,6 @@ export default function AnalysisPage() {
                 type="button"
               >
                 {creating ? copy.creating : copy.create}
-                {!creating && upload && (
-                  <kbd aria-hidden="true" className="shortcut-kbd">
-                    ↵ Enter
-                  </kbd>
-                )}
               </button>
               <span>{copy.quotaNotice}</span>
             </div>
@@ -381,7 +338,7 @@ export default function AnalysisPage() {
           task={task}
         />
 
-        {((task && task.status === "failed") || (!task && initialStatus === "failed")) && (
+        {((task && task.status === "failed") || (!task && initialStatus === "failed") || (error && error.name === "PollingTimeoutError")) && (
           <div className="recovery-panel">
             <div className="border-mask" aria-hidden="true" />
             <div className="recovery-header">
@@ -594,13 +551,18 @@ export default function AnalysisPage() {
                       <dt>
                         {String(label)}
                         {OBSERVATION_EXPLANATIONS[String(label)] && (
-                          <span className="tooltip-trigger" style={{ marginLeft: "4px" }}>
+                          <span
+                            className="tooltip-trigger"
+                            style={{ marginLeft: "4px" }}
+                            tabIndex={0}
+                            aria-describedby={`tooltip-${String(label)}`}
+                          >
                             <svg fill="none" height="12" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" width="12" style={{ opacity: 0.5, verticalAlign: "middle" }}>
                               <circle cx="12" cy="12" r="10" />
                               <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
                               <line x1="12" x2="12.01" y1="17" y2="17" />
                             </svg>
-                            <span className="tooltip-card">
+                            <span id={`tooltip-${String(label)}`} className="tooltip-card" role="tooltip">
                               {OBSERVATION_EXPLANATIONS[String(label)]}
                             </span>
                           </span>
@@ -659,21 +621,45 @@ export default function AnalysisPage() {
           </section>
         ) : null}
 
-        {sourceValid && taskId ? (
-          <div className="next-action">
-            <div className="border-mask" aria-hidden="true" />
-            <div>
-              <span className="section-kicker">{copy.continueKicker}</span>
-              <h2>{copy.sourceValid}</h2>
-            </div>
+            {/* 天体物理学与后期指南折叠面板 */}
+            {copy.astroGuideItems && (
+              <section className="analysis-section astro-guide-section">
+                <details className="astro-guide-details">
+                  <summary className="astro-guide-summary">
+                    <span className="section-kicker">{copy.astroGuideKicker}</span>
+                    <h3>
+                      {copy.astroGuideTitle}
+                      <svg className="astro-guide-summary__icon" fill="none" height="16" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" width="16" style={{ marginLeft: "8px", verticalAlign: "middle", transition: "transform 200ms ease" }}>
+                        <path d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </h3>
+                  </summary>
+                  <div className="astro-guide-content">
+                    {copy.astroGuideItems.map((item, index) => (
+                      <article key={index} className="astro-guide-card">
+                        <h4>{item.title}</h4>
+                        {item.desc.split("\n").map((line, lIdx) => (
+                          <p key={lIdx}>{line}</p>
+                        ))}
+                      </article>
+                    ))}
+                  </div>
+                </details>
+              </section>
+            )}
+
+            {sourceValid && taskId ? (
+              <div className="next-action">
+                <div className="border-mask" aria-hidden="true" />
+                <div>
+                  <span className="section-kicker">{copy.continueKicker}</span>
+                  <h2>{copy.sourceValid}</h2>
+                </div>
             <Link
               className="button button--primary"
               href={`/processing?source_task_id=${encodeURIComponent(taskId)}`}
             >
               {copy.processAction}
-              <kbd aria-hidden="true" className="shortcut-kbd">
-                P
-              </kbd>
             </Link>
           </div>
         ) : null}

@@ -71,8 +71,12 @@ export function useTaskPolling(taskId: string | null): TaskPollingResult {
     let active = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let controller: AbortController | null = null;
+    let requestTimeout: ReturnType<typeof setTimeout> | null = null;
     let latestSequence = 0;
+    let timedOut = false;
     const queuedSince = Date.now();
+    const pollingStartTime = Date.now();
+    const GLOBAL_TIMEOUT_MS = 180_000; // 3 minutes
     const api = getApiClient();
 
     queueMicrotask(() => {
@@ -133,9 +137,36 @@ export function useTaskPolling(taskId: string | null): TaskPollingResult {
     };
 
     const poll = async () => {
+      // 1. 全局轮询超时检查 (3分钟)
+      if (Date.now() - pollingStartTime > GLOBAL_TIMEOUT_MS) {
+        const timeoutError = new Error(
+          zhCN.task11.common.taskPollingTimeout ||
+            "任务状态同步超时，服务长时间未响应或已假死，请重试。"
+        );
+        timeoutError.name = "PollingTimeoutError";
+        setState((current) =>
+          current.taskId === taskId
+            ? { ...current, error: timeoutError, loading: false }
+            : current,
+        );
+        return; // 彻底停止轮询
+      }
+
       controller?.abort();
+      if (requestTimeout) clearTimeout(requestTimeout);
+
       controller = new AbortController();
       const currentController = controller;
+      timedOut = false;
+
+      // 2. 单次请求超时 (15秒)
+      requestTimeout = setTimeout(() => {
+        if (currentController === controller) {
+          timedOut = true;
+          controller.abort();
+        }
+      }, 15_000);
+
       try {
         const [nextTask, eventPage] = await Promise.all([
           api.getTask(taskId, { signal: currentController.signal }),
@@ -143,6 +174,9 @@ export function useTaskPolling(taskId: string | null): TaskPollingResult {
             signal: currentController.signal,
           }),
         ]);
+        
+        if (requestTimeout) clearTimeout(requestTimeout);
+
         if (!active || currentController.signal.aborted) {
           return;
         }
@@ -150,14 +184,26 @@ export function useTaskPolling(taskId: string | null): TaskPollingResult {
         let nextEvents = eventPage.events;
         let cursor = eventPage.next_after;
         let hasMore = eventPage.has_more;
+        
         while (hasMore && active && !currentController.signal.aborted) {
+          if (requestTimeout) clearTimeout(requestTimeout);
+          requestTimeout = setTimeout(() => {
+            if (currentController === controller) {
+              timedOut = true;
+              controller.abort();
+            }
+          }, 15_000);
+
           const page = await api.getTaskEvents(taskId, cursor, {
             signal: currentController.signal,
           });
+          
+          if (requestTimeout) clearTimeout(requestTimeout);
           nextEvents = nextEvents.concat(page.events);
           cursor = page.next_after;
           hasMore = page.has_more;
         }
+        
         if (!active || currentController.signal.aborted) {
           return;
         }
@@ -181,18 +227,39 @@ export function useTaskPolling(taskId: string | null): TaskPollingResult {
         schedule(nextTask.status);
         persistTask(nextTask);
       } catch (caught) {
-        if (!active || currentController.signal.aborted) {
+        if (requestTimeout) clearTimeout(requestTimeout);
+
+        if (!active) {
           return;
         }
-        const nextError =
-          caught instanceof Error
-            ? caught
-            : new Error(zhCN.task11.common.taskPollingError);
+        
+        if (currentController.signal.aborted && !timedOut) {
+          return;
+        }
+
+        const nextError = timedOut
+          ? new Error(
+              zhCN.task11.common.taskPollingTimeout ||
+                "任务状态同步超时，服务长时间未响应或已假死，请重试。"
+            )
+          : (caught instanceof Error
+              ? caught
+              : new Error(zhCN.task11.common.taskPollingError));
+
+        if (timedOut) {
+          nextError.name = "PollingTimeoutError";
+        }
+
         setState((current) =>
           current.taskId === taskId
             ? { ...current, error: nextError, loading: false }
             : current,
         );
+
+        if (timedOut) {
+          return; // 请求超时假死，直接终止轮询
+        }
+
         if (
           nextError instanceof StarunApiError &&
           (nextError.status === 410 || nextError.errorCode === "task_expired")
@@ -211,6 +278,7 @@ export function useTaskPolling(taskId: string | null): TaskPollingResult {
     return () => {
       active = false;
       if (timer) clearTimeout(timer);
+      if (requestTimeout) clearTimeout(requestTimeout);
       controller?.abort();
     };
   }, [taskId, refreshVersion]);

@@ -23,9 +23,23 @@ export const zhCN = {
       scope: "支持 FITS / XISF",
       quota: "每日最多 5 次任务，分析与自动出图共享",
     },
-    mockNotice: {
-      title: "当前能力边界",
-      body: "当前支持 FITS 与 XISF：程序提取元数据、基础统计和参考预览，AI 负责专业解读、艺术指导与参考图约束下的自动出图。",
+    faq: {
+      kicker: "新手科普",
+      title: "天文学与文件格式快速入门 FAQ",
+      items: [
+        {
+          question: "什么是原始的 FITS 或 XISF 图像文件？",
+          answer: "FITS (Flexible Image Transport System) 与 XISF (Extensible Image Serialization Format) 是天文学界与专业深空摄影的标准数据格式。它们采用高位深（通常是 16位 或 32位 浮点）保存了天体光子响应的纯线性科学数据。线性数据未经相机渲染或曲线拉伸，因此看起来通常漆黑一片，但蕴含着宝贵的物理信噪比信息。"
+        },
+        {
+          question: "为什么天文图像在处理前必须进行后期分析？",
+          answer: "深空摄影捕获的信号极微弱，天光背景中充斥着光害梯度、暗角和热噪声。后期分析（如 SNR 信噪比、FWHM 半高全宽、星点椭圆率）能帮助我们客观量化图像源品质，以此指导降噪强度、反卷积锐化系数以及通道色彩平衡，防止破坏脆弱的天体气流细节。"
+        },
+        {
+          question: "手头没有这两种天文专业图像文件，如何体验？",
+          answer: "FITS/XISF 只能由天文专用相机或天文叠加软件（如 PixInsight、DSS）输出。如果您只是想尝试本工具，可以从导航栏进入“开始分析”或“自动出图”流程，系统提供了内置的深空天体示例文件，无需上传本地文件，一键即可载入并体验完整的处理与分析报告流程。"
+        }
+      ]
     },
     features: {
       ariaLabel: "核心能力",
@@ -86,6 +100,7 @@ export const zhCN = {
       notApplicable: "不适用",
       hduLabel: (index: number | string) => `HDU ${index}`,
       taskPollingError: "任务状态同步失败，请稍后重试。",
+      taskPollingTimeout: "任务状态同步超时，服务长时间未响应或已假死，请重试。",
       historyPersistenceError: "本地历史记录写入失败。",
       storageWarning: (message: string) =>
         `任务状态仍会继续更新，但本地历史写入失败：${message}`,
@@ -104,6 +119,7 @@ export const zhCN = {
       replace: "重新选择",
       cancelled: "上传已取消。",
       networkError: "网络连接中断，上传未完成。",
+      offlineError: "网络连接断开。请检查您的网络连接并重试。",
       genericError: "上传失败，请稍后重试。",
       extensionError: "请选择 .fits、.fit、.fts 或 .xisf 文件。",
       sizeError: "文件超过 500 MB，未开始上传。",
@@ -213,6 +229,22 @@ export const zhCN = {
       continueKicker: "继续工作流",
       sourceValid: "源文件仍在有效期内",
       processAction: "使用此文件自动出图",
+      astroGuideKicker: "天体物理学与后期指南",
+      astroGuideTitle: "如何理解与优化这些物理指标？",
+      astroGuideItems: [
+        {
+          title: "信噪比 (SNR) ── 信号质量的黄金标准",
+          desc: "信噪比衡量天体信号与无规则背景噪声的比例。低信噪比意味着画面背景粗糙，星云细节淹没在噪点中。\n• 拍摄提升：延长单张曝光，或者累积更多总曝光时间（如从 2 小时增加到 10 小时）进行多张叠加。\n• 后期优化：在图像处于线性状态时使用基于多尺度变换的算法（如 MMT/TGVDenoise）进行精细降噪，平滑暗部并保护星云边缘。"
+        },
+        {
+          title: "半高全宽 (FWHM) ── 星点锐利度的科学度量",
+          desc: "FWHM 反映了恒星的半高全宽尺寸。值越小，代表星点越锐利、细节越丰富，受大气视宁度、赤道仪抖动及光学焦准影响。\n• 拍摄提升：使用高精度自动对焦系统每隔 1-2 小时或温度变化 1°C 时重新对焦；优化赤道仪导星（RMS 误差维持在 0.5\" 以下）。\n• 后期优化：在非线性拉伸前执行 Richardson-Lucy 反卷积算法以修复大气带来的弥散，或在拉伸后使用缩星算法以恢复画面锐度。"
+        },
+        {
+          title: "椭圆率 (Ellipticity) ── 跟踪与光路的精准度",
+          desc: "椭圆率表示星点的圆度偏离。星点拉长（椭圆率过高）通常是由极轴不准、导星拖尾、机械形变或边缘像差引起。\n• 拍摄提升：仔细进行三点极轴校准，定期检查导星稳定性；如果仅四周星点拉长，需检查焦平面倾斜度及平场镜/改正镜的后截距。\n• 后期优化：使用形变修复工具对拖尾方向进行矢量补偿修圆，或对高椭圆率星点进行定向收缩。"
+        }
+      ],
     },
     processing: {
       kicker: "AI 自动出图",
@@ -230,14 +262,17 @@ export const zhCN = {
         realistic: {
           label: "写实",
           description: "Agent 直接调用专业 Skill，保守处理原始图片",
+          previewDesc: "写实风格专注于还原真实的科学色彩与恒星亮度分布。它严格抑制星云的过度拉伸，保持宁静、暗弱的暗室背景，适合追求天体物理学真实性的摄影者。",
         },
         balanced: {
           label: "平衡",
           description: "Kimi 生成风格指导，再由专业 Skill 完成处理",
+          previewDesc: "平衡风格是在写实与艺术表现之间取得的完美平衡。它适度拉伸星云以呈现更多云气细节，并运用柔和的红蓝光谱色调，表现星系和星云的丰富层次。",
         },
         artistic: {
           label: "艺术",
           description: "Kimi 生成美化建议，腾讯混元执行图生图",
+          previewDesc: "艺术风格采用现代艺术美学进行强烈的艺术化拉伸。星点带有亮眼迫人的十字星芒，星云颜色对比剧烈（如经典的哈勃色调），视觉效果极其震撼。",
         },
       },
       creating: "正在创建任务…",

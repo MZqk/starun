@@ -11,7 +11,6 @@ import {
   SparkIcon,
   UploadIcon,
 } from "../components/Icons";
-import MockNotice from "../components/MockNotice";
 import { zhCN } from "../lib/i18n/zh-CN";
 import { fileTransfer } from "../lib/transfer";
 
@@ -175,7 +174,7 @@ export default function HomePage() {
               <div className={`upload-diagnostic-bar ${uploadError ? "has-error" : ""}`} aria-hidden="true">
                 <span className="diagnostic-dot"></span>
                 <span className="diagnostic-line"></span>
-                <span className="diagnostic-text" data-tooltip={uploadError ? "仅支持 .fits, .fit, .fts, .xisf 格式的天文图像源文件" : "准备好解析 FITS HDU 或 XISF 图像数据"}>
+                <span className="diagnostic-text" tabIndex={0} data-tooltip={uploadError ? "仅支持 .fits, .fit, .fts, .xisf 格式的天文图像源文件" : "准备好解析 FITS HDU 或 XISF 图像数据"}>
                   {uploadError ? "ERR_FILE_REJECTED" : "READY_TO_PARSE_HDU"}
                 </span>
               </div>
@@ -187,10 +186,6 @@ export default function HomePage() {
             </aside>
           </div>
         </section>
-
-        <div className="page-shell notice-wrap">
-          <MockNotice />
-        </div>
 
         <section className="features-section" aria-label={home.features.ariaLabel}>
           <div className="page-shell">
@@ -256,18 +251,18 @@ export default function HomePage() {
                     <div className="step-content">
                       <h3>{step.title}</h3>
                       <p>{step.description}</p>
-                      <div className="step-meta" aria-hidden="true">
+                      <div className="step-meta">
                         {index === 0 ? (
                           <code>
-                            INPUT: FITS_RAW_DATA | VERIFY: <span data-tooltip="Header Data Unit (文件头数据单元)，FITS 文件中的独立数据块">HDU_STRUCTURE</span>
+                            INPUT: FITS_RAW_DATA | VERIFY: <span tabIndex={0} data-tooltip="Header Data Unit (文件头数据单元)，FITS 文件中的独立数据块">HDU_STRUCTURE</span>
                           </code>
                         ) : index === 1 ? (
                           <code>
-                            METHOD: AI_DEEP_ADVISOR | ENGINE: <span data-tooltip="集成了专为天文图像定制优化的智能参数建议引擎">KIMI_INTELLIGENT</span>
+                            METHOD: AI_DEEP_ADVISOR | ENGINE: <span tabIndex={0} data-tooltip="集成了专为天文图像定制优化的智能参数建议引擎">KIMI_INTELLIGENT</span>
                           </code>
                         ) : (
                           <code>
-                            OUTPUT: L1_CALIBRATED_REPORT | <span data-tooltip="校准处理完毕后，可下载高动态范围的 TIFF 格式或 PNG 预览图">ARTIFACT_PNG_TIFF</span>
+                            OUTPUT: L1_CALIBRATED_REPORT | <span tabIndex={0} data-tooltip="校准处理完毕后，可下载高动态范围的 TIFF 格式或 PNG 预览图">ARTIFACT_PNG_TIFF</span>
                           </code>
                         )}
                       </div>
@@ -279,10 +274,36 @@ export default function HomePage() {
           </div>
         </section>
 
+        {home.faq && (
+          <section className="faq-section" aria-label={home.faq.title}>
+            <div className="page-shell">
+              <details className="faq-details">
+                <summary className="faq-summary">
+                  <span className="section-kicker">{home.faq.kicker}</span>
+                  <h3>
+                    {home.faq.title}
+                    <svg className="faq-summary__icon" fill="none" height="16" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" width="16" style={{ marginLeft: "8px", verticalAlign: "middle", transition: "transform 200ms ease" }}>
+                      <path d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </h3>
+                </summary>
+                <div className="faq-content">
+                  {home.faq.items.map((item, index) => (
+                    <article key={index} className="faq-card">
+                      <h4>{item.question}</h4>
+                      <p>{item.answer}</p>
+                    </article>
+                  ))}
+                </div>
+              </details>
+            </div>
+          </section>
+        )}
+
         <section className="privacy-section">
           <div className="page-shell privacy-layout">
             <div className="privacy-card">
-              <div className="sandbox-badge" aria-hidden="true" data-tooltip="所有天文图像处理都在您浏览器的本地沙盒环境中运行，数据绝对安全">
+              <div className="sandbox-badge" tabIndex={0} data-tooltip="所有天文图像处理都在您浏览器的本地沙盒环境中运行，数据绝对安全">
                 <span className="sandbox-badge__dot"></span>
                 <span className="sandbox-badge__text">LOCAL_SANDBOX_ACTIVE // NO_USER_DATA_LOGGED</span>
               </div>
@@ -292,7 +313,7 @@ export default function HomePage() {
             <div className="resource-panel-minimal">
               <div className="resource-header">
                 <span className="resource-header__title">HARDWARE_CONSTRAINTS</span>
-                <span className="resource-header__status" data-tooltip="本地 CPU 运算性能有限，建议单次仅上传单个 FITS 图像">CPU_LIMITED</span>
+                <span className="resource-header__status" tabIndex={0} data-tooltip="本地 CPU 运算性能有限，建议单次仅上传单个 FITS 图像">CPU_LIMITED</span>
               </div>
               <p className="resource-note">{home.privacy.resource}</p>
             </div>

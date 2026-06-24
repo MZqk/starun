@@ -78,7 +78,7 @@ export default function TaskStatusPanel({
   return (
     <section className="task-status-panel">
       <div className="border-mask" aria-hidden="true" />
-      <div>
+      <div key={status} className="status-header-anim">
         <span className={`status-dot status-dot--${status}`} aria-hidden="true" />
         <div aria-atomic="true" aria-live="polite">
           <span className="section-kicker">{copy.kicker}</span>
@@ -88,7 +88,13 @@ export default function TaskStatusPanel({
       <div className="task-status-panel__progress">
         <span>{task?.stage ?? copy.waiting}</span>
         <strong>{task?.progress ?? 0}%</strong>
-        <progress max={100} value={task?.progress ?? 0}>
+        <div className="progress-track" aria-hidden="true">
+          <div
+            className="progress-fill"
+            style={{ transform: `scaleX(${(task?.progress ?? 0) / 100})`, transformOrigin: "left" }}
+          />
+        </div>
+        <progress max={100} value={task?.progress ?? 0} className="sr-only">
           {task?.progress ?? 0}%
         </progress>
       </div>
@@ -100,7 +106,7 @@ export default function TaskStatusPanel({
           </div>
           <div>
             <dt>{copy.remainingLabel}</dt>
-            <dd>
+            <dd key={completedExpiry.seconds} className="time-remaining-value">
               {completedExpiry.seconds > 0
                 ? copy.remaining(completedExpiry.seconds)
                 : copy.expiredNow}

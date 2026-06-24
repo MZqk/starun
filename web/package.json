@@ -14,6 +14,7 @@
     "@tailwindcss/postcss": "^4",
     "geist": "^1.7.2",
     "next": "^16",
+    "ogl": "^1.0.11",
     "react": "^19",
     "react-dom": "^19",
     "tailwindcss": "^4"

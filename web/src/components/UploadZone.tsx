@@ -60,6 +60,9 @@ export default function UploadZone({
     null,
   );
   const [error, setError] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(
+    typeof window !== "undefined" ? window.navigator.onLine : true
+  );
 
   const resetInput = useCallback(() => {
     if (inputRef.current) {
@@ -69,6 +72,21 @@ export default function UploadZone({
 
   useEffect(() => {
     mountedRef.current = true;
+    
+    if (typeof window !== "undefined") {
+      const handleOnline = () => setIsOnline(true);
+      const handleOffline = () => setIsOnline(false);
+      window.addEventListener("online", handleOnline);
+      window.addEventListener("offline", handleOffline);
+      
+      return () => {
+        mountedRef.current = false;
+        xhrRef.current?.abort();
+        window.removeEventListener("online", handleOnline);
+        window.removeEventListener("offline", handleOffline);
+      };
+    }
+    
     return () => {
       mountedRef.current = false;
       xhrRef.current?.abort();
@@ -85,6 +103,12 @@ export default function UploadZone({
       setProgress(0);
       setFileName(file.name);
       setFileSize(file.size);
+
+      if (!isOnline) {
+        setPhase("idle");
+        setError(copy.offlineError);
+        return;
+      }
 
       if (!ACCEPTED_EXTENSION.test(file.name)) {
         setPhase("idle");
@@ -168,6 +192,8 @@ export default function UploadZone({
       copy.extensionError,
       copy.networkError,
       copy.sizeError,
+      copy.offlineError,
+      isOnline,
       onUploaded,
       resetInput,
     ],
@@ -190,15 +216,16 @@ export default function UploadZone({
   );
 
   const uploading = phase === "uploading" || phase === "validating";
+  const isZoneDisabled = disabled || !isOnline;
 
   return (
     <section className="upload-zone-wrap" aria-labelledby="upload-zone-title">
       <div className="border-mask" aria-hidden="true" />
       <div
-        className={dragging ? "upload-zone is-dragging" : "upload-zone"}
+        className={`${dragging ? "upload-zone is-dragging" : "upload-zone"} ${!isOnline ? "is-offline" : ""}`}
         onDragEnter={(event) => {
           event.preventDefault();
-          if (!disabled && !uploading) setDragging(true);
+          if (!isZoneDisabled && !uploading) setDragging(true);
         }}
         onDragLeave={(event) => {
           event.preventDefault();
@@ -208,18 +235,24 @@ export default function UploadZone({
         onDrop={(event) => {
           event.preventDefault();
           setDragging(false);
-          if (!disabled && !uploading) chooseFiles(event.dataTransfer.files);
+          if (!isZoneDisabled && !uploading) chooseFiles(event.dataTransfer.files);
         }}
       >
         <UploadIcon size={28} />
         <div>
           <h2 id="upload-zone-title">{copy.title}</h2>
-          <p>{copy.description}</p>
+          {isOnline ? (
+            <p>{copy.description}</p>
+          ) : (
+            <p className="upload-zone__offline-warn" style={{ color: "var(--color-space-accent)", fontWeight: "600" }}>
+              ⚠️ {copy.offlineError}
+            </p>
+          )}
         </div>
         <input
           accept=".fits,.fit,.fts,.xisf"
           aria-label={copy.inputLabel}
-          disabled={disabled || uploading}
+          disabled={isZoneDisabled || uploading}
           onChange={(event) => {
             const files = event.currentTarget.files;
             chooseFiles(files);
@@ -230,7 +263,7 @@ export default function UploadZone({
         />
         <button
           className="button button--secondary"
-          disabled={disabled || uploading}
+          disabled={isZoneDisabled || uploading}
           onClick={() => {
             resetInput();
             inputRef.current?.click();

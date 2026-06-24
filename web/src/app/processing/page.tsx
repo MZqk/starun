@@ -89,6 +89,21 @@ export default function ProcessingPage() {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [initialStatus, setInitialStatus] = useState<TaskStatus | null>(null);
+  const [isOnline, setIsOnline] = useState(
+    typeof window !== "undefined" ? window.navigator.onLine : true
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
   const [creating, setCreating] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -288,35 +303,7 @@ export default function ProcessingPage() {
     }
   }
 
-  useEffect(() => {
-    if (taskId) return;
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const active = document.activeElement?.tagName;
-      if (active === "INPUT" || active === "TEXTAREA" || active === "SELECT") {
-        return;
-      }
-
-      if (e.key === "1") {
-        setStyle("realistic");
-      } else if (e.key === "2") {
-        setStyle("balanced");
-      } else if (e.key === "3") {
-        setStyle("artistic");
-      } else if (e.key === "Enter") {
-        const canSubmit = (upload || sourceTaskId) && !creating;
-        if (canSubmit) {
-          e.preventDefault();
-          void createTask();
-        }
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [taskId, upload, sourceTaskId, creating, createTask]);
 
   const resetToUpload = useCallback(() => {
     setTaskId(null);
@@ -429,11 +416,15 @@ export default function ProcessingPage() {
                     <span>
                       <strong>
                         {copy.styles[value].label}
-                        <kbd className="style-shortcut-kbd" aria-hidden="true">
-                          {value === "realistic" ? "1" : value === "balanced" ? "2" : "3"}
-                        </kbd>
                       </strong>
                       <small>{copy.styles[value].description}</small>
+                      
+                      <span className="style-preview-card" aria-hidden="true">
+                        <span className={`style-preview-card__visual style-preview-card__visual--${value}`} />
+                        <span className="style-preview-card__desc">
+                          {copy.styles[value].previewDesc}
+                        </span>
+                      </span>
                     </span>
                   </label>
                 ))}
@@ -443,16 +434,11 @@ export default function ProcessingPage() {
             <div className="workflow-action-row">
               <button
                 className="button button--primary"
-                disabled={(!upload && !sourceTaskId) || creating}
+                disabled={(!upload && !sourceTaskId) || creating || !isOnline}
                 onClick={() => void createTask()}
                 type="button"
               >
-                {creating ? copy.creating : copy.create}
-                {!creating && (upload || sourceTaskId) && (
-                  <kbd aria-hidden="true" className="shortcut-kbd">
-                    ↵ Enter
-                  </kbd>
-                )}
+                {!isOnline ? "网络已断开" : (creating ? copy.creating : copy.create)}
               </button>
               <span>{copy.styleNotice}</span>
             </div>
@@ -466,7 +452,7 @@ export default function ProcessingPage() {
           task={task}
         />
 
-        {((task && task.status === "failed") || (!task && initialStatus === "failed")) && (
+        {((task && task.status === "failed") || (!task && initialStatus === "failed") || (error && error.name === "PollingTimeoutError")) && (
           <div className="recovery-panel">
             <div className="border-mask" aria-hidden="true" />
             <div className="recovery-header">
