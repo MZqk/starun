@@ -201,7 +201,6 @@ def _professional_analysis(analysis, advice):
             "背景趋势、星点 FWHM 和噪声估计都是诊断量，不应作为固定软件预设直接套用。",
             "缺少 plate solving、测光校色验证和区域物理 SNR 时，所有目标类型判断都应保留不确定性。",
         ],
-        "preview_metadata": {},
     }
 
 
@@ -255,12 +254,6 @@ def run(source_path, output_dir, result_path, request_path=None):
         width, height = image.size
 
     professional = _professional_analysis(analysis, advice)
-    professional["preview_metadata"] = {
-        "width": width,
-        "height": height,
-        "lower_percentile_value": 0.0,
-        "upper_percentile_value": 1.0,
-    }
 
     result = {
         "schema_version": "starun.skill-result/v1",

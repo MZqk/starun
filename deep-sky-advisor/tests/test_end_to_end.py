@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,9 @@ from astropy.io import fits
 
 
 ROOT = Path(__file__).parents[1]
+sys.path.insert(0, str(ROOT.parent / "api"))
+
+from app.agent_sdk.contracts import AnalysisSkillResult
 
 
 def load_module(name, path):
@@ -104,6 +108,11 @@ class EndToEndTests(unittest.TestCase):
             self.assertTrue((output_dir / "analysis-preview.png").exists())
             self.assertTrue((output_dir / "analysis-processing-report.md").exists())
             self.assertGreaterEqual(len(result["analysis"]["workflow"]), 4)
+            self.assertNotIn("preview_metadata", result["analysis"])
+            AnalysisSkillResult.model_validate_json(
+                result_path.read_text(encoding="utf-8"),
+                strict=True,
+            )
 
 
 if __name__ == "__main__":
