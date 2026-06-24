@@ -26,6 +26,7 @@ class AgentSdkRunSpec:
     input_text: str
     source_path: Path
     inspection: FitsInspection
+    skill_path: Path | None = None
 
 
 class AgentSdkRuntime(Protocol):

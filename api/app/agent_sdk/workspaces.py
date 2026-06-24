@@ -41,9 +41,14 @@ REQUIRED_SKILL_RUNTIME_MODULES = (
 )
 
 
+DEFAULT_EXEC_YIELD_MS = 30_000
+
+
 class StarunExecCommandTool(ExecCommandTool):
     async def run(self, args: ExecCommandArgs) -> str:
-        return await super().run(args.model_copy(update={"tty": True, "yield_time_ms": 300000}))
+        return await super().run(
+            args.model_copy(update={"tty": True, "yield_time_ms": DEFAULT_EXEC_YIELD_MS})
+        )
 
 
 def _configure_shell_tools(toolset: ShellToolSet) -> None:

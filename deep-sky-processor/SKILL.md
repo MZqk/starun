@@ -151,6 +151,15 @@ final_color + star_reduce + local_enhance + style)
 
 ## 系统集成与运行环境
 
+Starun API 通过 `scripts/run_starun_processing.py` 作为唯一自动化入口调用本
+Skill。该入口负责读取 Starun sandbox 中的 `input/request.json`、
+`input/inspection.json` 和原始图像，内部调用本 Skill 的诊断、预览和管线能力，
+并写出符合 Starun Agents SDK 合约的 `output/processing-result.json`。
+
+这个入口仅用于 Starun 网站的低 turn、可验证自动化调用；不改变本 Skill 作为独立
+深空后期助手时的默认工作方式。独立使用时仍应优先采用上文的 Agent-in-the-loop
+阶段式闭环、视觉审查和参数回退流程。
+
 关于以下内容的详细信息，请参阅参考文档 [system_integration.md](file:///Users/mz/dev/starun/deep-sky-processor/references/system_integration.md)：
 - **支持格式**：FITS、XISF、TIFF、PNG/JPG 图像的输入与输出说明。
 - **何时读取 references**：其他 15 个具体业务与物理先验参考文档列表。

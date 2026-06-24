@@ -37,7 +37,7 @@ from app.agent_sdk.errors import (
 )
 from app.artifacts.contracts import JsonValue
 from app.agent_sdk.providers import build_agent_model
-from app.agent_sdk.runtime import OpenAiSandboxRuntime
+from app.agent_sdk.runtime import DirectProcessingSkillRuntime, OpenAiSandboxRuntime
 from app.agent_sdk.runtime_types import AgentSdkRunSpec, AgentSdkRuntime
 from app.agent_sdk.workspaces import SkillDefinition, build_task_manifest
 from app.artifacts.store import ArtifactStore
@@ -124,6 +124,7 @@ class AgentSdkBridge:
             ),
             source_path=source_path,
             inspection=inspection,
+            skill_path=skill.path,
         )
 
     def build_processing_spec(
@@ -171,12 +172,13 @@ class AgentSdkBridge:
             agent=agent,
             manifest=manifest,
             input_text=(
-                "读取 input/request.json，使用 deep-sky-processor skill 完成自动出图，"
-                "读取 input/result-schema.json，并严格按该 Schema 写出 "
+                "进入 deep-sky-processor skill 目录，只调用 scripts/run_starun_processing.py "
+                "完成自动出图。读取 input/request.json 和 input/result-schema.json，并严格写出 "
                 "output/processing-result.json。"
             ),
             source_path=source_path,
             inspection=inspection,
+            skill_path=None if style is ProcessingStyle.ARTISTIC else skill.path,
         )
 
     async def run(
@@ -247,6 +249,8 @@ class AgentSdkBridge:
             await runtime.delete()
 
     def _default_runtime(self, spec: AgentSdkRunSpec) -> AgentSdkRuntime:
+        if spec.task_type is TaskType.PROCESSING and spec.style is not ProcessingStyle.ARTISTIC:
+            return DirectProcessingSkillRuntime(spec)
         return OpenAiSandboxRuntime(spec)
 
     async def _run_artistic(

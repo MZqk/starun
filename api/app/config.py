@@ -1,7 +1,7 @@
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     data_root: Path = Path("./data")
     analysis_skill_path: Path = Path("../deep-sky-advisor")
     processing_skill_path: Path = Path("../deep-sky-processor")
-    agent_max_turns: int = 15
+    agent_max_turns: int = Field(default=15, ge=1)
     max_upload_bytes: int = 500 * 1024 * 1024
     upload_ttl_seconds: int = 3600
     task_ttl_seconds: int = 86400
@@ -46,6 +46,11 @@ class Settings(BaseSettings):
         "tokenhub.tencentmaas.com,aiart-1258344699.cos.ap-guangzhou.myqcloud.com"
     )
     web_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
+    @field_validator("agent_max_turns")
+    @classmethod
+    def cap_agent_max_turns(cls, value: int) -> int:
+        return min(value, 30)
 
     @property
     def allowed_image_download_hosts(self) -> frozenset[str]:
