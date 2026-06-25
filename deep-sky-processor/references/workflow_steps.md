@@ -247,4 +247,3 @@ python scripts/pipeline.py input.fits output.jpg \
 - 星系：`saturation` 1.1-1.35，`hdr_strength` 0.35-0.6，锐化可略强。
 - 反射星云：拉伸可强，饱和和锐化要柔和。
 - 球状星团/M45：管线已自动禁用 `star_remove`/`star_reduce`，无需手动操作。
-

@@ -44,12 +44,12 @@ AI 的职责：
 ## Agent-in-the-loop 模式
 
 默认优先使用阶段式闭环，不要只制定一次计划后运行完整管线。
-有关会话初始化、单阶段动作提交（`agent_workflow.py` 调用）、前后对比图审查以及动作/评审协议 JSON 规格，请参阅参考文档 [agent_protocol.md](file:///Users/mz/dev/starun/deep-sky-processor/references/agent_protocol.md) 和 [physical_metadata.md](file:///Users/mz/dev/starun/deep-sky-processor/references/physical_metadata.md)。
+有关会话初始化、单阶段动作提交（`agent_workflow.py` 调用）、前后对比图审查以及动作/评审协议 JSON 规格，请参阅参考文档 [agent_protocol.md](references/agent_protocol.md) 和 [physical_metadata.md](references/physical_metadata.md)。
 
 - **高风险阶段**：对 `dbe`、`stretch`、`star_remove`、`star_reduce`、`star_process`、`enhance`、`style` 等关键步骤必须逐步审查。
 - **低风险步骤**：可合并执行，但最终需进行真实性审查。
 - **星点处理依赖**：管线会自动处理星点相关的前置与后置链路依赖。
-- **局部控制**：对于 Hα/OIII/亮部/暗部等局部微调，使用蒙版工具，详细参考 [mask_workflow.md](file:///Users/mz/dev/starun/deep-sky-processor/references/mask_workflow.md)。
+- **局部控制**：对于 Hα/OIII/亮部/暗部等局部微调，使用蒙版工具，详细参考 [mask_workflow.md](references/mask_workflow.md)。
 
 ## 真实性红线
 
@@ -89,11 +89,11 @@ AI 的职责：
 2. **Round 2: 针对问题增强**：根据诊断报告对 DBE、降噪、拉伸、缩星、细节增强及定调风格进行微调。
 3. **Round 3: 审查和定稿**：运行 `quality_metrics.py` 进行数值门禁审查。
 
-详细的处理流程指导、CLI 命令行示例、`--override-params` 常用键及其初值推荐、以及参考图定调与 GHS 处理，请参阅参考文档 [workflow_steps.md](file:///Users/mz/dev/starun/deep-sky-processor/references/workflow_steps.md)。
+详细的处理流程指导、CLI 命令行示例、`--override-params` 常用键及其初值推荐、以及参考图定调与 GHS 处理，请参阅参考文档 [workflow_steps.md](references/workflow_steps.md)。
 
 ## 引擎细节与数值质量指标
 
-有关以下内容的详细设计、物理与数学原理，请参阅参考文档 [engine_details.md](file:///Users/mz/dev/starun/deep-sky-processor/references/engine_details.md)：
+有关以下内容的详细设计、物理与数学原理，请参阅参考文档 [engine_details.md](references/engine_details.md)：
 - **星点处理引擎 v2**：多尺度星点检测、连通域特征过滤、梯度感知阈值及 OpenCV Telea/Navier-Stokes/高斯修复。
 - **FITS I/O 精度保护（v2）**：绝对值归一化、float32 输出防止精度丢失与分层色块。
 - **质量审查标准**：`median`、`corner_uniformity_ratio` 等各项数值质量门禁与视觉 Critic 审查标准。
@@ -160,8 +160,13 @@ Skill。该入口负责读取 Starun sandbox 中的 `input/request.json`、
 深空后期助手时的默认工作方式。独立使用时仍应优先采用上文的 Agent-in-the-loop
 阶段式闭环、视觉审查和参数回退流程。
 
-关于以下内容的详细信息，请参阅参考文档 [system_integration.md](file:///Users/mz/dev/starun/deep-sky-processor/references/system_integration.md)：
+关于以下内容的详细信息，请参阅参考文档 [system_integration.md](references/system_integration.md)：
 - **支持格式**：FITS、XISF、TIFF、PNG/JPG 图像的输入与输出说明。
 - **何时读取 references**：其他 15 个具体业务与物理先验参考文档列表。
 - **环境要求**：环境只读 Python Runtime、包依赖与路径配置规则。
 - **Starun 网站处理风格**：`realistic`、`balanced`、`artistic` 处理模式细节。
+
+## 已知问题
+
+- **大图 OOM**：DBE（RBF 方法）在图像 >5MP（如 2877×2038）且内存 <16GB 时可能 OOM。
+  缓解方案：使用 `--low-memory --tile-size 512` 并显式指定 `--steps` 跳过 DBE，或先降采样再处理。

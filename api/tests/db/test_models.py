@@ -130,7 +130,7 @@ def test_settings_defaults(monkeypatch) -> None:
     settings = Settings(_env_file=None)
 
     assert settings.database_url == "sqlite:///./starun.db"
-    assert settings.data_root == Path("./data")
+    assert settings.data_root == Path(__file__).parents[2] / "data"
     assert settings.max_upload_bytes == 500 * 1024 * 1024
     assert settings.upload_ttl_seconds == 3600
     assert settings.task_ttl_seconds == 86400

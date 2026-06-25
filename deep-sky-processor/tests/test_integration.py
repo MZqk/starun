@@ -15,7 +15,7 @@ sys.path.insert(0, str(SCRIPTS))
 from gradient_removal import remove_gradient
 
 from pipeline import (apply_crop, detect_black_edge_crop, detect_target_crop,
-                      parse_crop, run_pipeline)
+                      parse_crop, plan_edge_artifact_crop, run_pipeline)
 from quality_metrics import calculate_metrics
 from star_tools import mild_star_reduce_full, separate_stars
 from stretch import (apply_luminance_stretch, arcsinh_stretch,
@@ -81,6 +81,41 @@ class IntegrationTests(unittest.TestCase):
         crop, info = detect_black_edge_crop(image, min_run=4)
         self.assertEqual(crop, (2, 4, 73, 113))
         self.assertTrue(info["trimmed"])
+
+    def test_edge_crop_plan_applies_when_subject_is_safe(self):
+        image = np.full((120, 80, 3), 0.003, dtype=np.float32)
+        image[:8] = 0
+        image[:, :5] = 0
+        recognition = {
+            "primary_region": {
+                "bbox": [0.35, 0.35, 0.2, 0.2],
+                "confidence": 0.8,
+            },
+        }
+
+        crop, info = plan_edge_artifact_crop(image, recognition=recognition)
+
+        self.assertIsNotNone(crop)
+        self.assertTrue(info["applied"])
+        self.assertEqual(crop[0], 5)
+        self.assertEqual(crop[1], 8)
+
+    def test_edge_crop_plan_rejects_when_subject_would_be_cut(self):
+        image = np.full((120, 80, 3), 0.003, dtype=np.float32)
+        image[:8] = 0
+        image[:, :5] = 0
+        recognition = {
+            "primary_region": {
+                "bbox": [0.0, 0.02, 0.3, 0.3],
+                "confidence": 0.8,
+            },
+        }
+
+        crop, info = plan_edge_artifact_crop(image, recognition=recognition)
+
+        self.assertIsNone(crop)
+        self.assertFalse(info["applied"])
+        self.assertEqual(info["rejected_reason"], "would_clip_recognized_subject")
 
     def test_emission_processing_preserves_red_signal_and_neutralizes_blackpoint(self):
         image = np.full((64, 64, 3), [0.03, 0.01, 0.008], dtype=np.float32)

@@ -1,140 +1,129 @@
-# Quantitative diagnostic interpretation
+# 定量诊断指标解读
 
-Use this reference when reading `*_analysis.json` produced by `scripts/analyze_file.py`.
+在阅读 `scripts/analyze_file.py` 生成的 `*_analysis.json` 时使用本参考文档。
 
-## Contents
+## 目录
 
-- Evidence model
-- Statistics
-- Clipping
-- Noise
-- Background and gradient
-- Stars
-- Color
-- Classification
+- 证据模型
+- 统计量
+- 裁剪
+- 噪点
+- 背景与渐变
+- 星点
+- 色彩
+- 分类
 
-## Evidence model
+## 证据模型
 
-Every diagnostic section includes an `evidence` field:
+每个诊断节均包含 `evidence` 字段：
 
-- `measured`: calculated directly from the supplied pixel data;
-- `measured_on_robust_normalization`: calculated after mapping luminance P0.1–P99.9 to 0–1;
-- `metadata_and_filename_heuristic`: inferred from headers and naming;
-- `unavailable`: insufficient valid samples;
-- `not_applicable`: the metric does not apply to this channel model.
+- `measured`: 直接从提供的像素数据计算得出；
+- `measured_on_robust_normalization`: 将亮度 P0.1–P99.9 映射到 0–1 后计算得出；
+- `metadata_and_filename_heuristic`: 从头信息和文件名推断；
+- `unavailable`: 有效样本不足；
+- `not_applicable`: 该指标不适用于此通道模型。
 
-Do not promote heuristic or unavailable fields into measured facts.
+不得将启发式推断或不可用的字段提升为测量事实。
 
-## Statistics
+## 统计量
 
-`statistics` preserves the original numeric range and reports robust percentiles, MAD sigma,
-NaN/Inf ratios, and exact/near extrema.
+`statistics` 保留原始数值范围，报告鲁棒百分位数、MAD sigma、NaN/Inf 占比以及精确/近似极值。
 
-- High `exact_max_ratio` can indicate clipping, integer limits, masks, or synthetic borders.
-- High `exact_min_ratio` can indicate clipped black pixels, stacking borders, masks, or valid zero
-  backgrounds.
-- These fields do not identify the physical cause.
+- 高 `exact_max_ratio` 可能表明裁剪、整数边界、蒙版或合成边框。
+- 高 `exact_min_ratio` 可能表明裁剪的黑像素、叠加边缘、蒙版或有效的零值背景。
+- 这些字段不识别物理原因。
 
-## Clipping
+## 裁剪
 
-`clipping` is measured after robust P0.1–P99.9 normalization.
+`clipping` 在鲁棒 P0.1–P99.9 归一化后测量。
 
-- `highlight_ratio_ge_0_999` identifies pixels at the bright end of the review mapping.
-- `shadow_ratio_le_0_001` identifies pixels at the dark end.
-- Do not call these pixels sensor-saturated without checking original ADU limits, bit depth,
-  calibration history, and star cores.
-- Do not call shadows black-clipped without inspecting the original histogram and invalid borders.
+- `highlight_ratio_ge_0_999` 标识审查映射中位于亮端的像素。
+- `shadow_ratio_le_0_001` 标识暗端像素。
+- 在未检查原始 ADU 边界、位深、校准历史和星点核心之前，不得将这些像素称为传感器饱和。
+- 在未检查原始直方图和无效边框之前，不得将暗部像素称为黑位裁剪。
 
-Use the highlights preview for visual confirmation.
+使用高亮预览进行视觉确认。
 
-## Noise
+## 噪点
 
-`noise.background_noise_sigma_normalized` is the MAD sigma of a 3×3 median-filter residual,
-sampled from the darkest 35% of normalized luminance.
+`noise.background_noise_sigma_normalized` 是从归一化亮度最暗的 35% 区域采样的 3×3 中值滤波残差的 MAD sigma。
 
-It is useful for:
+其用途：
 
-- comparing versions of the same registered image;
-- identifying unusually noisy backgrounds;
-- deciding whether linear denoising deserves inspection.
+- 比较同一配准图像的不同版本；
+- 识别异常噪点的背景；
+- 判断线性降噪是否值得检查。
 
-It is not:
+其并非：
 
-- physical SNR;
-- read noise in electrons;
-- valid proof that faint low-frequency structure is noise.
+- 物理信噪比；
+- 以电子为单位的读出噪点；
+- 暗弱低频结构是噪点的有效证据。
 
-Resampling, drizzle, compression, previous denoising, undersampling, and real faint signal can
-change the estimate. Check `block_sigma_median`, `block_sigma_p90`, and sample count.
+重采样、Drizzle、压缩、先前的降噪、欠采样以及真实的暗弱信号都可能改变估计值。请同时检查 `block_sigma_median`、`block_sigma_p90` 和采样计数。
 
-## Background and gradient
+## 背景与渐变
 
-`background.plane` fits a plane to low-signal sampled pixels:
+`background.plane` 对低信号采样像素拟合平面：
 
-- `x_change_across_frame`;
-- `y_change_across_frame`;
-- `magnitude_across_frame`;
-- `angle_degrees`;
-- `r_squared`;
-- `residual_rms`.
+- `x_change_across_frame`；
+- `y_change_across_frame`；
+- `magnitude_across_frame`；
+- `angle_degrees`；
+- `r_squared`；
+- `residual_rms`。
 
-`region_medians_normalized` and `corner_mean_over_center` provide independent spatial anchors.
+`region_medians_normalized` 和 `corner_mean_over_center` 提供独立的空间锚点。
 
-Interpretation:
+解读：
 
-- high magnitude with high R² supports a coherent low-frequency trend;
-- low R² means a plane does not explain the background well;
-- low corner/center ratio can be consistent with vignetting, but also with target placement or
-  real sky structure;
-- different RGB plane vectors can indicate chromatic gradient or real line emission.
+- 高 magnitude 加高 R² 支持存在一致的低频趋势；
+- 低 R² 意味着平面不能很好地解释背景；
+- 低角心比可能与渐晕一致，但也可能与目标位置或真实天空结构有关；
+- 不同 RGB 平面向量可能指示色差渐变或真实线发射信号。
 
-Never recommend background subtraction from these values alone. Inspect the background preview,
-target type, framing, flats, mosaics, H-alpha/IFN/dust risk, and a trial background model.
+切勿仅凭这些数值就推荐背景扣除。需检查背景预览图、目标类型、构图、平场、拼接、H-alpha/IFN/尘埃风险，以及背景模型试验效果。
 
-## Stars
+## 星点
 
-`stars` detects local maxima and calculates background-subtracted second moments for unsaturated
-star-like patches.
+`stars` 检测局部最大值，并对未饱和星点状斑块计算扣除背景后的二阶矩。
 
-Useful fields:
+可用字段：
 
-- `usable_star_count`;
-- `fwhm_major_median_px` and `fwhm_minor_median_px`;
-- `axis_ratio_median`;
-- `eccentricity_median` and `eccentricity_p90`;
-- `position_angle_median_deg`.
+- `usable_star_count`；
+- `fwhm_major_median_px` 和 `fwhm_minor_median_px`；
+- `axis_ratio_median`；
+- `eccentricity_median` 和 `eccentricity_p90`；
+- `position_angle_median_deg`。
 
-Limitations:
+局限性：
 
-- this is not a nonlinear PSF fit;
-- blends, nebular knots, diffraction spikes, undersampling, and processed stars can bias results;
-- one median angle cannot diagnose tracking without checking spatial consistency;
-- FWHM in pixels is not seeing in arcseconds without reliable pixel scale;
-- final processed images cannot be used to judge acquisition FWHM reliably.
+- 这不是非线性 PSF 拟合；
+- 重叠、星云结块、衍射芒、欠采样和已处理的星点都可能使结果产生偏差；
+- 仅凭一个中位角无法在不检查空间一致性的前提下诊断跟踪误差；
+- 以像素为单位的 FWHM 不等于以角秒为单位的视宁度，除非有可靠的像素比例；
+- 已完成后期处理的图像不能可靠地用于判断采集阶段的 FWHM。
 
-If fewer than five candidates pass validation, the section reports `unavailable`. Do not invent
-star-shape conclusions.
+若少于五个候选星点通过验证，该节报告 `unavailable`。不得凭空编造星点形态结论。
 
-## Color
+## 色彩
 
-`color` reports background channel medians, channel P99, correlation, and collapsed channels.
+`color` 报告背景通道中值、通道 P99、相关性以及塌缩通道。
 
-- Background imbalance can result from light pollution, calibration, filter response, or real
-  emission.
-- High red signal in an emission field is not automatically a red cast.
-- Narrowband and dual-band data do not obey broadband white-balance assumptions.
-- Channel correlation describes morphology similarity, not color accuracy.
+- 背景不平衡可能源于光害、校准、滤镜响应或真实发射信号。
+- 发射天区的高红色信号不自动等同于红色偏色。
+- 窄带和双窄带数据不遵从宽带白平衡假设。
+- 通道相关性描述形态相似性，而非色彩精度。
 
-Catalog-based color accuracy requires WCS, suitable stellar photometry, instrument response, and
-unsaturated-star measurements; this analyzer does not perform that validation.
+基于星表的色彩精度需要 WCS、合适的恒星光度测量、仪器响应和未饱和恒星测量；本分析器不执行此类验证。
 
-## Classification
+## 分类
 
-`classification` uses FITS/XISF metadata and filenames.
+`classification` 使用 FITS/XISF 元数据和文件名。
 
-- `frame_role`: probable light/dark/flat/bias or unknown;
-- `processing_stage`: probable integrated/master state or unknown;
-- `transfer_state`: likely linear for astronomical containers, but not guaranteed;
-- `channel_model`: inferred from dimensions, filter, and Bayer metadata.
+- `frame_role`: 可能的亮场/暗场/平场/偏置，或未知；
+- `processing_stage`: 可能的已叠加/母版状态，或未知；
+- `transfer_state`: 天文容器通常为线性，但不保证；
+- `channel_model`: 从维度、滤镜和 Bayer 元数据推断。
 
-Treat all classification fields as provisional unless acquisition history confirms them.
+除非有采集历史确认，所有分类字段均视为暂定。

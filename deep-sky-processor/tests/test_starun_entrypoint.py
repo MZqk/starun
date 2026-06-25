@@ -85,6 +85,7 @@ class StarunProcessingEntrypointTests(unittest.TestCase):
                 return {"paths": {"full": str(preview)}}
 
             def fake_pipeline(**kwargs):
+                self.assertIsNotNone(kwargs.get("analysis_report"))
                 output_path = Path(kwargs["output_path"])
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 Image.new("RGB", (20, 14), color=(32, 36, 40)).save(output_path)
@@ -111,6 +112,11 @@ class StarunProcessingEntrypointTests(unittest.TestCase):
 
             with (
                 patch.object(starun_processing.recognize, "create_safe_preview_bundle", side_effect=fake_preview),
+                patch.object(starun_processing.analyze, "analyze_image", return_value={
+                    "recommendations": {
+                        "stretch": {"factor": 72.0, "method": "very_dark"},
+                    },
+                }),
                 patch.object(starun_processing.pipeline, "run_pipeline", side_effect=fake_pipeline),
             ):
                 starun_processing.run(
@@ -133,7 +139,13 @@ class StarunProcessingEntrypointTests(unittest.TestCase):
             artifact_names = {artifact.name for artifact in result.artifacts}
             self.assertEqual(
                 artifact_names,
-                {"reference.jpg", "style-prompt.json", "result.jpg", "pipeline-result.json"},
+                {
+                    "reference.jpg",
+                    "style-prompt.json",
+                    "result.jpg",
+                    "pipeline-result.json",
+                    "analysis-report.json",
+                },
             )
 
 

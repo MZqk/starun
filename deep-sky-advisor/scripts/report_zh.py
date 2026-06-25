@@ -1,5 +1,21 @@
 """Chinese localization for generated Markdown processing reports."""
 
+from software_guidance import get_software_guidance
+
+
+CAUTIONS_ZH = {
+    "A numeric trend is not proof of removable background.": "数值趋势不能证明背景可移除。",
+    "Inspect the background model and difference image before accepting correction.": "接受校正前必须检查背景模型和差分图。",
+    "This target/filter can contain real large-scale signal that resembles a gradient.": "该目标/滤镜可能包含类似梯度的真实大尺度信号。",
+    "Background channel imbalance is not by itself proof of a color cast.": "背景通道不平衡本身不能证明存在色偏。",
+    "This metric is not physical SNR and cannot prove that faint structure is noise.": "该指标不是物理信噪比，不能证明暗弱结构是噪声。",
+    "Moment-based FWHM is not a full PSF fit or seeing measurement.": "基于矩的 FWHM 不是完整 PSF 拟合或视宁度测量。",
+    "Robust-normalized clipping ratios are review indicators, not physical sensor saturation.": "稳健归一化裁切比例是审查指标，不是物理传感器饱和。",
+    "Do not label this sensor saturation without original ADU/bit-depth evidence.": "没有原始 ADU/位深证据时，不得标记为传感器饱和。",
+    "M45, globular clusters, and open clusters require explicit star preservation.": "M45、球状星团和疏散星团需要明确的星点保护。",
+    "Do not apply broadband white-balance assumptions to nebular line emission.": "不得将宽带白平衡假设应用于星云发射线。",
+}
+
 
 OPERATION_TEXT = {
     "calibrate_integrate": {
@@ -296,7 +312,8 @@ def localized_evidence(evidence):
 
 def localized_guidance(software, operation):
     operation_id = operation["id"]
-    source = operation["software_guidance"]
+    # 用渲染时的 software 重新获取工具列表，而非 operation 中存储的（可能是 generic 上下文构建的）
+    source = get_software_guidance(software, operation_id)
     generic = GENERIC_GUIDANCE[operation_id]
     specific = SOFTWARE_STEPS.get(software, {}).get(operation_id, [])
     return {
@@ -307,6 +324,10 @@ def localized_guidance(software, operation):
         "checkpoints": CHECKPOINTS[operation_id],
         "failure_signs": FAILURES[operation_id],
     }
+
+
+def localized_caution(caution):
+    return CAUTIONS_ZH.get(caution, caution)
 
 
 def localized_value(value):

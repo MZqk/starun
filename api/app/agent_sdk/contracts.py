@@ -67,6 +67,7 @@ class AnalysisSkillResult(BaseModel):
     model: str = Field(min_length=1, max_length=200)
     preview: AnalysisPreview
     analysis: ProfessionalAnalysis
+    markdown: str = Field(min_length=1, max_length=240_000)
     artifacts: list[SkillArtifactClaim] = Field(min_length=2, max_length=16)
 
     @model_validator(mode="after")

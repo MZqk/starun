@@ -130,7 +130,11 @@ class EndToEndTests(unittest.TestCase):
             )
             self.assertTrue((output_dir / "analysis-report.json").exists())
             self.assertTrue((output_dir / "analysis-preview.png").exists())
-            self.assertTrue((output_dir / "analysis-processing-report.md").exists())
+            self.assertFalse((output_dir / "analysis-processing-report.md").exists())
+            report = json.loads((output_dir / "analysis-report.json").read_text(encoding="utf-8"))
+            self.assertNotIn("markdown", report)
+            self.assertIn("# 深空天体后期处理建议", result["markdown"])
+            self.assertIn("## 1. 整体后期处理建议", result["markdown"])
             self.assertGreaterEqual(len(result["analysis"]["workflow"]), 4)
             self.assertNotIn("preview_metadata", result["analysis"])
             AnalysisSkillResult.model_validate_json(

@@ -21,6 +21,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 import pipeline
+import analyze
 import recognize
 
 
@@ -152,6 +153,18 @@ def _write_reference(source_path: Path, output_dir: Path) -> str:
     return reference_path.name
 
 
+def _write_analysis_report(source_path: Path, output_dir: Path) -> dict[str, Any] | None:
+    """Generate the adaptive analysis report used by the Starun direct entrypoint."""
+    report_path = output_dir / "analysis-report.json"
+    try:
+        report = analyze.analyze_image(str(source_path))
+    except Exception as exc:
+        print(f"[WARN] adaptive analysis failed: {exc}", file=sys.stderr)
+        return None
+    _write_json(report_path, _jsonable(report))
+    return report
+
+
 def _style_prompt(
     inspection: dict[str, Any],
     pipeline_result: dict[str, Any],
@@ -249,6 +262,7 @@ def run(
     pipeline_result_path = output_dir / "pipeline-result.json"
     result_image_path = output_dir / "result.jpg"
     work_dir = output_dir / "intermediates"
+    analysis_report = _write_analysis_report(source_path, output_dir)
 
     pipeline_result = pipeline.run_pipeline(
         input_path=str(source_path),
@@ -259,6 +273,7 @@ def run(
         use_starnet=True,
         style="natural" if style == "realistic" else "auto",
         style_strength=0.8 if style == "realistic" else 1.0,
+        analysis_report=analysis_report,
         result_json=str(pipeline_result_path),
         quality_policy="advisory",
     )
@@ -277,6 +292,8 @@ def run(
         _artifact(result_image_path.name),
         _artifact(pipeline_result_path.name),
     ]
+    if analysis_report is not None:
+        artifacts.append(_artifact("analysis-report.json"))
 
     if style == "balanced":
         style_prompt_path = output_dir / "style-prompt.json"

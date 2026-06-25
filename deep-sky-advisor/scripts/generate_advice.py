@@ -13,6 +13,7 @@ from software_guidance import get_software_guidance
 from target_guidance import get_target_guidance
 from report_zh import (
     REQUIRED_INFO,
+    localized_caution,
     localized_evidence,
     localized_guidance,
     localized_operation,
@@ -52,56 +53,56 @@ DECISION_LABELS = {
 
 SOFTWARE_MAP = {
     "generic": {
-        "calibrate_integrate": "Calibrate, register, reject poor subframes, and integrate before post-processing.",
-        "crop_edges": "Crop only invalid stacking borders.",
-        "background_review": "Build a trial low-frequency background model and inspect the model before applying it.",
-        "color_calibration": "Use catalog-constrained color calibration after plate solving.",
-        "narrowband_mapping": "Document the measured channel-to-color mapping; calibrate stars separately when appropriate.",
-        "linear_denoise": "Apply masked linear noise reduction conservatively.",
-        "star_shape_review": "Inspect subframes and spatial star-shape maps before attempting cosmetic correction.",
-        "controlled_stretch": "Stretch in small increments while protecting highlights and monitoring black point.",
-        "highlight_protection": "Use a range/core mask or HDR technique to protect bright structures.",
-        "star_treatment": "Use optional, target-safe star reduction only after the target is established.",
-        "final_export": "Preserve a high-bit-depth master and export a color-managed display copy.",
+        "calibrate_integrate": "在天文专用软件中完成校准、注册、异常值拒绝和叠加。",
+        "crop_edges": "仅裁切无效的叠加边缘。",
+        "background_review": "建立低复杂度试验背景模型，先审查再决定是否应用。",
+        "color_calibration": "完成 WCS 求解后使用星表约束的色彩校准。",
+        "narrowband_mapping": "明确记录通道到显示颜色的映射，必要时单独校准恒星层。",
+        "linear_denoise": "保守使用带保护蒙版的线性降噪。",
+        "star_shape_review": "在尝试美容修正前，先检查单帧和空间星点形态图。",
+        "controlled_stretch": "分步小幅拉伸，保护高光，监控黑位。",
+        "highlight_protection": "使用范围/亮核蒙版或 HDR 技术保护亮结构。",
+        "star_treatment": "在目标建立后，仅做目标安全的可选星点处理。",
+        "final_export": "保留高位深母版，导出色彩管理的展示副本。",
     },
     "siril": {
-        "calibrate_integrate": "Use Siril preprocessing, registration, sequence assessment, rejection maps, and stacking.",
-        "crop_edges": "Use Crop on invalid registration borders before background sampling.",
-        "background_review": "Use Background Extraction/RBF cautiously; inspect samples and the generated model.",
-        "color_calibration": "Plate solve, then use Photometric Color Calibration for broadband RGB/OSC data.",
-        "narrowband_mapping": "Use Pixel Math/channel composition with an explicitly documented narrowband mapping.",
-        "linear_denoise": "Use linear-stage wavelet/noise-reduction tools with a protective mask.",
-        "star_shape_review": "Compare individual frames, registration results, and center/corner stars.",
-        "controlled_stretch": "Use GHS, Asinh, or Histogram Transformation incrementally.",
-        "highlight_protection": "Use GHS symmetry/protection controls or a range mask for bright cores.",
-        "star_treatment": "Use star processing only when stars are not the subject; inspect at 100%.",
-        "final_export": "Save a 32-bit FITS master and export a color-managed 16-bit TIFF/display image.",
+        "calibrate_integrate": "使用 Siril 预处理、注册、序列评估、拒绝图和叠加。",
+        "crop_edges": "在背景采样前，使用 Crop 移除无效注册边缘。",
+        "background_review": "谨慎使用 Background Extraction/RBF；检查样本和生成的模型。",
+        "color_calibration": "完成 Plate Solving 后，对宽带 RGB/OSC 数据使用 Photometric Color Calibration。",
+        "narrowband_mapping": "使用 Pixel Math/通道合成，并明确记录窄带映射。",
+        "linear_denoise": "在线性阶段使用小波/降噪工具，配合保护蒙版。",
+        "star_shape_review": "比较单帧、注册结果和中心/角落星点形态。",
+        "controlled_stretch": "分步使用 GHS、Asinh 或 Histogram Transformation。",
+        "highlight_protection": "使用 GHS 保护参数或范围蒙版保护亮核。",
+        "star_treatment": "仅当星点不是主体时使用星点处理；100% 视图检查。",
+        "final_export": "保存 32-bit FITS 母版，导出色彩管理的 16-bit TIFF/展示图。",
     },
     "pixinsight": {
-        "calibrate_integrate": "Use WBPP/SubframeSelector, inspect rejection maps, and integrate only accepted frames.",
-        "crop_edges": "Use DynamicCrop on invalid registration borders before DBE/SPCC.",
-        "background_review": "Use DBE/ABE only after validating samples and the background model against real sky structure.",
-        "color_calibration": "Solve the image and use SPCC with the actual camera/filter response if it is available.",
-        "narrowband_mapping": "Use PixelMath/NarrowbandNormalization with a documented mapping; do not call it natural RGB.",
-        "linear_denoise": "Use MLT/TGV or another linear method under a luminance/range mask.",
-        "star_shape_review": "Use FWHMEccentricity/SubframeSelector and inspect spatial trends before deconvolution.",
-        "controlled_stretch": "Transfer a checked STF to HistogramTransformation or use GHS incrementally.",
-        "highlight_protection": "Use RangeSelection masks, HDRMultiscaleTransform, or a restrained GHS stretch.",
-        "star_treatment": "Use StarNet/MorphologicalTransformation only when target-safe and artifact-free.",
-        "final_export": "Keep a 32-bit XISF master and export a color-managed 16-bit TIFF/display image.",
+        "calibrate_integrate": "使用 WBPP/SubframeSelector，检查拒绝图，仅叠加入选帧。",
+        "crop_edges": "在 DBE/SPCC 之前，使用 DynamicCrop 移除无效注册边缘。",
+        "background_review": "在样本和背景模型通过真实天体结构检查后，再使用 DBE/ABE。",
+        "color_calibration": "完成图像求解后，使用 SPCC 配合实际相机/滤镜响应。",
+        "narrowband_mapping": "使用 PixelMath/NarrowbandNormalization 配合已记录的映射；不得称为自然 RGB。",
+        "linear_denoise": "在亮度/范围蒙版下使用 MLT/TGV 或其他线性方法。",
+        "star_shape_review": "使用 FWHMEccentricity/SubframeSelector，在反卷积前检查空间趋势。",
+        "controlled_stretch": "将经过检查的 STF 转入 HistogramTransformation，或分步使用 GHS。",
+        "highlight_protection": "使用 RangeSelection 蒙版、HDRMultiscaleTransform 或受控 GHS 拉伸。",
+        "star_treatment": "仅当目标安全且无伪影时使用 StarNet/MorphologicalTransformation。",
+        "final_export": "保留 32-bit XISF 母版，导出色彩管理的 16-bit TIFF/展示图。",
     },
     "photoshop": {
-        "calibrate_integrate": "Photoshop is not the correct tool for calibration, registration, or integration.",
-        "crop_edges": "Crop only known invalid stacking borders; keep an untouched master layer.",
-        "background_review": "Return to linear astronomy software for background modeling; do not clone or heal the sky.",
-        "color_calibration": "Perform photometric color calibration before Photoshop; use adjustment layers only for finishing.",
-        "narrowband_mapping": "Import an already documented narrowband composition; do not fabricate missing channels.",
-        "linear_denoise": "Perform linear denoising before Photoshop; use masked finishing noise reduction only if needed.",
-        "star_shape_review": "Diagnose tracking/optical causes outside Photoshop; do not paint or warp stars as a default fix.",
-        "controlled_stretch": "Use reversible Curves adjustment layers in small increments on a 16-bit image.",
-        "highlight_protection": "Use luminosity masks and reversible Curves to protect bright cores and star color.",
-        "star_treatment": "Use masked, low-opacity star adjustments only when target-safe; inspect for black halos.",
-        "final_export": "Keep a layered 16-bit master and export an embedded-profile display copy.",
+        "calibrate_integrate": "Photoshop 不用于校准、注册或叠加；返回 Siril/PixInsight 完成。",
+        "crop_edges": "仅裁切已知无效的叠加边缘；保留未触碰的母版图层。",
+        "background_review": "背景建模返回线性天文软件完成；不得在天区使用仿制或修复工具。",
+        "color_calibration": "在 Photoshop 之前完成测光校色；Photoshop 中仅用调整图层做收尾。",
+        "narrowband_mapping": "导入已记录的窄带合成图；不得补造缺失通道。",
+        "linear_denoise": "在 Photoshop 之前完成线性降噪；仅在必要时使用带蒙版的收尾降噪。",
+        "star_shape_review": "跟踪/光学原因在外部诊断；不得默认使用绘画或液化把星点强行修圆。",
+        "controlled_stretch": "在 16-bit 图像上使用可逆 Curves 调整图层分步小幅拉伸。",
+        "highlight_protection": "使用亮度蒙版和可逆 Curves 保护亮核和星色。",
+        "star_treatment": "仅当目标安全时使用带蒙版、低不透明度的星点调整；检查黑圈。",
+        "final_export": "保留分层 16-bit 母版，导出嵌入配置文件的展示副本。",
     },
 }
 
@@ -565,6 +566,33 @@ SIRIL_OPS = {"calibrate_integrate", "crop_edges", "background_review", "color_ca
 PI_OPS = {"background_review", "color_calibration", "narrowband_mapping", "linear_denoise", "star_shape_review", "controlled_stretch", "highlight_protection", "star_treatment", "final_export"}
 PS_OPS = {"background_review", "color_calibration", "narrowband_mapping", "linear_denoise", "controlled_stretch", "highlight_protection", "star_treatment", "final_export"}
 
+# 按 SKILL.md 第 311-360 行模板，为每个软件章节定义固定子章节及对应的 operation_id。
+# 渲染时按此顺序输出；命中 active 操作展开详情，命中 skip 操作简短说明跳过原因，
+# 整个子章节均未触发时给出默认策略提示。
+SOFTWARE_SUBSECTIONS = {
+    "siril": [
+        ("校准与叠加", ["calibrate_integrate", "crop_edges"]),
+        ("背景提取与审查", ["background_review"]),
+        ("色彩校准", ["color_calibration", "narrowband_mapping"]),
+        ("拉伸与增强", ["controlled_stretch", "highlight_protection", "star_shape_review", "star_treatment"]),
+        ("输出", ["final_export"]),
+    ],
+    "pixinsight": [
+        ("线性阶段降噪", ["linear_denoise"]),
+        ("色彩校准", ["color_calibration", "narrowband_mapping"]),
+        ("非线性拉伸", ["controlled_stretch"]),
+        ("细节增强与对比", ["star_shape_review", "highlight_protection"]),
+        ("星点安全处理", ["star_treatment"]),
+        ("输出", ["final_export"]),
+    ],
+    "photoshop": [
+        ("最终调色", ["color_calibration", "narrowband_mapping"]),
+        ("局部增强", ["controlled_stretch", "highlight_protection"]),
+        ("星点处理", ["star_treatment"]),
+        ("输出优化", ["final_export"]),
+    ],
+}
+
 SOFTWARE_DESC = {
     "siril": "Siril 是天文摄影的入口工具，核心任务是从原始帧构建干净、可靠的叠加母版。",
     "pixinsight": "PixInsight 是线性阶段处理的核心引擎，承担降噪、色彩校准、拉伸和细节增强的主要任务。",
@@ -666,6 +694,13 @@ def _render_overall_section(context, analysis, guidance, active_ids, skip_ops, a
         lines.append(f"- {item}")
     lines.append("")
 
+    style_rec = guidance.get("style_recommendation")
+    if style_rec:
+        lines.append("### 专业风格推荐")
+        lines.append("")
+        lines.append(style_rec)
+        lines.append("")
+
     lines.append("### 推荐操作顺序")
     lines.append("")
     if active_ids:
@@ -704,7 +739,7 @@ def _render_overall_section(context, analysis, guidance, active_ids, skip_ops, a
     return lines
 
 
-def _render_software_section(software, guidance, ops_by_id, active_ids):
+def _render_software_section(software, guidance, ops_by_id):
     lines = []
     idx = 2 + ["siril", "pixinsight", "photoshop"].index(software)
     lines.append(f"## {idx}. {localized_value(software)} 软件的后期关键步骤")
@@ -718,30 +753,39 @@ def _render_software_section(software, guidance, ops_by_id, active_ids):
         lines.append(f"- {item}")
     lines.append("")
 
-    if software == "siril":
-        relevant = [op_id for op_id in active_ids if op_id in SIRIL_OPS]
-    elif software == "pixinsight":
-        relevant = [op_id for op_id in active_ids if op_id in PI_OPS]
-    else:
-        relevant = [op_id for op_id in active_ids if op_id in PS_OPS]
-
-    if relevant:
-        lines.append(f"### {localized_value(software)} 中的详细操作指引")
+    # 按 SKILL.md 模板渲染固定子章节；命中 active 操作展开详情，命中 skip 操作简短说明，
+    # 整个子章节均未触发时给出默认策略提示。
+    for subsec_title, op_ids in SOFTWARE_SUBSECTIONS[software]:
+        lines.append(f"### {subsec_title}")
         lines.append("")
-        for op_id in relevant:
-            op = ops_by_id[op_id]
-            text = localized_operation(op)
-            sw_guidance = get_software_guidance(software, op_id)
 
-            lines.append(f"#### {OPERATION_LABELS[op_id]}")
+        relevant_ops = [ops_by_id[op_id] for op_id in op_ids if op_id in ops_by_id]
+        if not relevant_ops:
+            lines.append(f"> 本次诊断未触发该子章节相关操作，按目标类型默认策略执行。")
+            lines.append("")
+            continue
+
+        active_ops = [op for op in relevant_ops if op["decision"] in {"recommend", "review"}]
+        skip_ops = [op for op in relevant_ops if op["decision"] == "skip"]
+
+        for op in active_ops:
+            text = localized_operation(op)
+            sw_guidance = localized_guidance(software, op)
+            decision_label = DECISION_LABELS[op["decision"]]
+
+            lines.append(f"#### {OPERATION_LABELS[op['id']]}（{decision_label}）")
             lines.append("")
             lines.append(f"- 目的：{text['purpose']}")
             lines.append(f"- 起始策略：{text['start']}")
             lines.append(f"- 调整原则：{text['adjust']}")
+            if op.get("cautions"):
+                lines.append("- 注意事项：")
+                for caution in op["cautions"]:
+                    lines.append(f"  - {localized_caution(caution)}")
             lines.append("- 诊断证据：")
             for ev in op["evidence"]:
                 lines.append(f"  - `{ev['path']}` = `{localized_value(ev.get('value'))}` — {localized_evidence(ev)}")
-            lines.append(f"- 软件处理方向：{SOFTWARE_MAP[software][op_id]}")
+            lines.append(f"- 软件处理方向：{SOFTWARE_MAP[software][op['id']]}")
             lines.append("- 关键工具：")
             for item in sw_guidance["tools"]:
                 lines.append(f"  - {item}")
@@ -755,12 +799,22 @@ def _render_software_section(software, guidance, ops_by_id, active_ids):
             for item in sw_guidance["mask_strategy"]:
                 lines.append(f"  - {item}")
             lines.append("- 阶段验收：")
-            op_guidance = op.get("software_guidance", {})
-            for item in op_guidance.get("checkpoints", []):
+            for item in sw_guidance["checkpoints"]:
                 lines.append(f"  - {item}")
             lines.append("- 失败征象与回退：")
-            for item in op_guidance.get("failure_signs", []):
+            for item in sw_guidance["failure_signs"]:
                 lines.append(f"  - {item}")
+            lines.append("")
+
+        for op in skip_ops:
+            text = localized_operation(op)
+            lines.append(f"#### {OPERATION_LABELS[op['id']]}（当前跳过）")
+            lines.append("")
+            lines.append(f"- 跳过原因：{text['purpose']}")
+            if op.get("cautions"):
+                lines.append("- 注意事项：")
+                for caution in op["cautions"]:
+                    lines.append(f"  - {localized_caution(caution)}")
             lines.append("")
 
     return lines
@@ -779,9 +833,9 @@ def render_markdown(advice):
 
     lines = ["# 深空天体后期处理建议", ""]
     lines.extend(_render_overall_section(context, analysis, guidance, active_ids, skip_ops, advice))
-    lines.extend(_render_software_section("siril", guidance, ops_by_id, active_ids))
-    lines.extend(_render_software_section("pixinsight", guidance, ops_by_id, active_ids))
-    lines.extend(_render_software_section("photoshop", guidance, ops_by_id, active_ids))
+    lines.extend(_render_software_section("siril", guidance, ops_by_id))
+    lines.extend(_render_software_section("pixinsight", guidance, ops_by_id))
+    lines.extend(_render_software_section("photoshop", guidance, ops_by_id))
     return "\n".join(lines) + "\n"
 
 

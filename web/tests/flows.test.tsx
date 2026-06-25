@@ -495,6 +495,109 @@ describe("Task 11 flows", () => {
     expect(screen.getByText("在 Photoshop 中使用可逆调整图层输出成片。")).toBeVisible();
   });
 
+  it("uses analysis-result markdown as the analysis page output when available", async () => {
+    window.history.replaceState({}, "", "/analysis?task=analysis-result");
+    await new TaskHistoryRepository().upsert({
+      taskId: "analysis-result",
+      type: "analysis",
+      fileName: "ic434.fits",
+      lastStatus: "completed",
+      createdAt: "2026-06-14T09:00:00Z",
+      expiresAt: "2036-06-15T11:00:00Z",
+      resultAvailable: true,
+    });
+    api.getTask.mockResolvedValue(
+      taskDetail({
+        id: "analysis-result",
+        status: "completed",
+        expires_at: "2036-06-15T11:00:00Z",
+        result: {
+          manifest_available: true,
+          summary: {
+            model: "deterministic-skill-v1",
+            analysis: {
+              overview: "旧结构化摘要不应作为主显示。",
+              image_quality: {
+                rating: "good",
+                summary: "fallback",
+                confidence: 0.8,
+              },
+              observations: {
+                target: "fallback",
+                background: "fallback",
+                stars: "fallback",
+                noise: "fallback",
+                color: "fallback",
+              },
+              issues: [],
+              workflow: [
+                {
+                  order: 1,
+                  step: "旧工作流",
+                  purpose: "fallback",
+                  guidance: "fallback",
+                },
+              ],
+              caveats: ["fallback"],
+            },
+          },
+          artifacts: ["analysis-result.json"],
+        },
+      }),
+    );
+    api.downloadArtifact.mockResolvedValue({
+      blob: new Blob(
+        [
+          JSON.stringify({
+            markdown: [
+              "# 深空天体后期处理建议",
+              "",
+              "## 1. 整体后期处理建议",
+              "",
+              "IC 434 markdown output",
+              "",
+              "## 2. Siril 软件的后期关键步骤",
+              "",
+              "Siril 分档内容",
+              "",
+              "## 3. PixInsight 软件的后期关键步骤",
+              "",
+              "PixInsight 分档内容",
+              "",
+              "## 4. Photoshop 软件中的后期关键步骤",
+              "",
+              "Photoshop 分档内容",
+            ].join("\n"),
+          }),
+        ],
+        { type: "application/json" },
+      ),
+      fileName: "analysis-result.json",
+      mediaType: "application/json",
+      size: 72,
+    });
+
+    render(<AnalysisPage />);
+
+    expect(await screen.findByText(/IC 434 markdown output/)).toBeVisible();
+    expect(screen.getByRole("heading", { name: "深空天体后期处理建议" })).toBeVisible();
+    const softwareColumns = screen.getByLabelText("Siril 与 PixInsight 后期关键步骤");
+    expect(within(softwareColumns).getByRole("heading", { name: "Siril 软件的后期关键步骤" })).toBeVisible();
+    expect(within(softwareColumns).getByRole("heading", { name: "PixInsight 软件的后期关键步骤" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Photoshop 软件的后期关键步骤" })).toBeVisible();
+    expect(screen.getByText("Siril 分档内容")).toBeVisible();
+    expect(screen.getByText("PixInsight 分档内容")).toBeVisible();
+    expect(screen.getByText("Photoshop 分档内容")).toBeVisible();
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "旧工作流" })).not.toBeInTheDocument();
+    });
+    expect(api.downloadArtifact).toHaveBeenCalledWith(
+      "analysis-result",
+      "analysis-result.json",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
   it("requires exactly one processing style and defaults to balanced", async () => {
     const user = userEvent.setup();
     render(<ProcessingPage />);

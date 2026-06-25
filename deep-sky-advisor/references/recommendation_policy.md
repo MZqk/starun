@@ -1,91 +1,83 @@
-# Recommendation policy
+# 建议策略
 
-Use this reference when converting `*_analysis.json` into processing instructions.
+在将 `*_analysis.json` 转换为处理指令时使用本参考文档。
 
-## Contents
+## 目录
 
-- Decision states
-- Evidence requirements
-- Parameter rules
-- Stage rules
-- Target and filter safety
-- Acceptance and rollback
+- 决策状态
+- 证据要求
+- 参数规则
+- 阶段规则
+- 目标与滤镜安全规则
+- 验收与回退
 
-## Decision states
+## 决策状态
 
-- `recommend`: enough evidence exists to include the operation in the default sequence.
-- `review`: evidence indicates a possible need, but visual or external confirmation is required.
-- `skip`: current evidence does not justify the operation or a safety rule prohibits it.
+- `recommend`: 有足够证据将该操作纳入默认序列。
+- `review`: 证据表明可能存在需求，但需要视觉或外部确认。
+- `skip`: 现有证据不足以支撑该操作，或安全规则禁止执行。
 
-Never present `review` as an automatic action.
+不得将 `review` 作为自动操作呈现。
 
-## Evidence requirements
+## 证据要求
 
-Every `recommend` or `review` operation must cite one or more exact JSON paths from the analysis
-report or explicit user context.
+每个 `recommend` 或 `review` 操作必须引用分析报告中的一个或多个精确 JSON 路径，或明确的用户上下文。
 
-Valid examples:
+有效示例：
 
 - `background.plane.magnitude_across_frame`
 - `noise.background_noise_sigma_normalized`
 - `stars.fwhm_major_median_px`
 - `classification.processing_stage`
 
-Do not cite a preview impression as measured evidence. Record it separately as visual evidence.
+不得将预览印象作为测量证据引用。应将其单独记录为视觉证据。
 
-## Parameter rules
+## 参数规则
 
-Use one of:
+使用以下之一：
 
-- `qualitative`: no numeric value is justified; describe direction and inspection criteria.
-- `evidence_bound`: derive a relative value from a measured field, such as mask scale relative to
-  measured FWHM.
-- `unavailable`: required evidence does not exist.
+- `qualitative`: 无正当数值；描述调整方向与检查标准。
+- `evidence_bound`: 从测量字段推导相对值，例如蒙版尺度相对于实测 FWHM。
+- `unavailable`: 所需证据不存在。
 
-Do not emit an `exact` parameter mode. Fixed software presets are not evidence.
+不得输出 `exact` 参数模式。固定的软件预设值不是证据。
 
-When using `evidence_bound`, include the source JSON path and state the measurement limitation.
+使用 `evidence_bound` 时，需注明来源 JSON 路径并说明测量的局限性。
 
-## Stage rules
+## 阶段规则
 
-- Calibration frames: recommend calibration use, not aesthetic post-processing.
-- Unintegrated light frame: prioritize calibration, registration, subframe evaluation, and
-  integration; stop before final stretch advice.
-- Integrated likely-linear master: background review, color/channel work, optional linear
-  denoise, stretch, target-safe finishing.
-- Unknown stage: request confirmation and avoid irreversible stage-dependent operations.
-- Already nonlinear image: do not recommend linear-only operations as though the data were linear.
+- 校准帧：建议用于校准用途，而非审美后期处理。
+- 未叠加的单张亮场：优先校准、配准、子帧评估和叠加；在最终拉伸建议之前停止。
+- 已完成叠加的可能线性母版：背景审查、色彩/通道处理、可选的线性降噪、拉伸、目标安全的收尾处理。
+- 未知阶段：要求确认，避免不可逆的阶段相关操作。
+- 已是非线性图像：不得像对线性数据那样推荐仅适用于线性阶段的操作。
 
-## Target and filter safety
+## 目标与滤镜安全规则
 
-- Emission nebula, dark nebula, IFN, reflection nebula, supernova remnant, and wide field:
-  background correction always requires model inspection.
-- Globular cluster, open cluster, and M45: skip star removal and global star reduction.
-- Narrowband/dual-band: do not recommend broadband white balance for nebular emission.
-- Galaxy: protect outer halo, tidal features, and bright core.
-- Planetary nebula: protect the central star and shell transitions.
+- 发射星云、暗星云、IFN、反射星云、超新星遗迹和广域：背景校正始终要求模型审查。
+- 球状星团、疏散星团和 M45：跳过去星和全局星点缩小。
+- 窄带/双窄带：不得对星云发射信号推荐宽带白平衡。
+- 星系：保护外晕、潮汐结构和明亮核心。
+- 行星状星云：保护中心星和壳层过渡区。
 
-## Acceptance and rollback
+## 验收与回退
 
-Every `recommend` or `review` operation must contain:
+每个 `recommend` 或 `review` 操作必须包含：
 
-- at least one acceptance check describing a successful result;
-- at least one rollback condition identifying lost signal, artifacts, clipping, color damage, or
-  target-specific failure.
+- 至少一条验收检查，描述成功结果；
+- 至少一条回退条件，识别信号丢失、伪影、裁剪、色彩损伤或针对特定目标的失败。
 
-Advice without acceptance and rollback criteria is incomplete.
+缺少验收和回退标准的建议是不完整的。
 
-## Software-specific output
+## 软件特定输出
 
-For the selected application, every expanded operation must provide:
+对于选定的软件，每个展开的操作必须提供：
 
-- key tools or process entry points;
-- ordered execution steps;
-- parameter-selection logic tied to evidence;
-- mask or protection strategy;
-- stage checkpoints;
-- visible failure signs and rollback conditions.
+- 关键工具或流程入口；
+- 有序的执行步骤；
+- 与证据挂钩的参数选择逻辑；
+- 蒙版或保护策略；
+- 阶段检查点；
+- 可见的失败信号与回退条件。
 
-Do not repeat full Siril, PixInsight, and Photoshop workflows in one report. Expand only the
-software selected by the user. Summarize skipped operations instead of emitting full instructions
-for them.
+不得在同一报告中重复输出完整的 Siril、PixInsight 和 Photoshop 工作流程。仅展开用户选定软件的内容。对跳过的操作进行概述，而非输出完整指令。

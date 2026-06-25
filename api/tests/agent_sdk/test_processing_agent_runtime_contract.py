@@ -1,3 +1,5 @@
+import json
+
 from app.agent_sdk.bridge import AgentSdkBridge
 from app.agent_sdk import runtime as runtime_module
 from app.agent_sdk.runtime import (
@@ -6,6 +8,7 @@ from app.agent_sdk.runtime import (
     _analysis_entrypoint_command,
     _processing_entrypoint_command,
 )
+from app.artifacts.store import ArtifactStore
 from app.config import Settings
 from app.db.models import ProcessingStyle
 from app.fits.schemas import BasicStatistics, FitsInspection, HduSummary
@@ -35,6 +38,57 @@ def _inspection() -> FitsInspection:
             finite_pixel_count=256,
         ),
         header={},
+    )
+
+
+def _analysis_result_bytes() -> bytes:
+    return (
+        json.dumps(
+            {
+                "schema_version": "starun.skill-result/v1",
+                "status": "success",
+                "provider": "deep-sky-advisor",
+                "model": "deterministic-skill-v1",
+                "preview": {
+                    "artifact": "analysis-preview.png",
+                    "width": 16,
+                    "height": 16,
+                    "lower_percentile_value": 0.0,
+                    "upper_percentile_value": 1.0,
+                },
+                "analysis": {
+                    "overview": "IC 434 analysis",
+                    "image_quality": {
+                        "rating": "good",
+                        "summary": "usable signal",
+                        "confidence": 0.8,
+                    },
+                    "observations": {
+                        "target": "IC 434",
+                        "background": "mild gradient",
+                        "stars": "limited star samples",
+                        "noise": "low noise",
+                        "color": "rgb",
+                    },
+                    "issues": [],
+                    "workflow": [
+                        {
+                            "order": 1,
+                            "step": "stretch",
+                            "purpose": "reveal faint signal",
+                            "guidance": "use controlled stretch",
+                        }
+                    ],
+                    "caveats": ["preview is stretched"],
+                },
+                "markdown": "# Deep sky report\n\nIC 434 markdown output",
+                "artifacts": [
+                    {"name": "analysis-report.json", "media_type": "application/json"},
+                    {"name": "analysis-preview.png", "media_type": "image/png"},
+                ],
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
     )
 
 
@@ -84,6 +138,52 @@ def test_analysis_uses_direct_skill_runtime(tmp_path) -> None:
 
     assert isinstance(bridge._default_runtime(spec), DirectAnalysisSkillRuntime)
     assert spec.skill_path == settings.analysis_skill_path
+
+
+@pytest.mark.asyncio
+async def test_analysis_publish_includes_skill_result_file(tmp_path) -> None:
+    source = tmp_path / "source.fits"
+    source.write_bytes(b"fits")
+    settings = Settings(
+        _env_file=None,
+        ai_api_key="test-key",
+        analysis_skill_path=tmp_path / "deep-sky-advisor",
+    )
+    settings.analysis_skill_path.mkdir()
+    spec = AgentSdkBridge(settings).build_analysis_spec(
+        task_id="analysis-result-publish",
+        source_path=source,
+        inspection=_inspection(),
+    )
+    result_bytes = _analysis_result_bytes()
+
+    class FakeRuntime:
+        async def read_bytes(self, path: str) -> bytes:
+            if path == "output/analysis-result.json":
+                return result_bytes
+            if path == "output/analysis-report.json":
+                return b'{"source_analysis":{},"advice":{}}\n'
+            if path == "output/analysis-preview.png":
+                return b"png"
+            raise FileNotFoundError(path)
+
+    task_dir = tmp_path / "data" / "tasks" / spec.task_id
+    with ArtifactStore(task_dir) as store:
+        run = await AgentSdkBridge(settings)._read_and_publish(
+            FakeRuntime(),
+            spec,
+            store,
+        )
+
+    names = [artifact.name for artifact in run.artifacts]
+    assert names == [
+        "analysis-result.json",
+        "analysis-report.json",
+        "analysis-preview.png",
+    ]
+    assert (task_dir / "analysis-result.json").read_bytes() == result_bytes
+    assert run.summary["analysis"]["overview"] == "IC 434 analysis"
+    assert run.summary["markdown"] == "# Deep sky report\n\nIC 434 markdown output"
 
 
 def test_direct_processing_runtime_command_targets_starun_entrypoint(tmp_path) -> None:

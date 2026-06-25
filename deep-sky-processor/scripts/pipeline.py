@@ -353,6 +353,60 @@ def detect_black_edge_crop(image, max_invalid_fraction=0.005,
     }
 
 
+def _recognition_primary_bounds(recognition, width, height):
+    if not recognition:
+        return None
+    primary = recognition.get("primary_region")
+    if not isinstance(primary, dict):
+        return None
+    bbox = primary.get("bbox")
+    confidence = float(primary.get("confidence", 0.0))
+    if not isinstance(bbox, list) or len(bbox) != 4 or confidence < 0.35:
+        return None
+    x, y, w_frac, h_frac = [float(value) for value in bbox]
+    x0 = int(np.floor(x * width))
+    y0 = int(np.floor(y * height))
+    x1 = int(np.ceil((x + w_frac) * width))
+    y1 = int(np.ceil((y + h_frac) * height))
+    margin = max(4, int(min(width, height) * 0.02))
+    return (
+        max(0, x0 - margin),
+        max(0, y0 - margin),
+        min(width, x1 + margin),
+        min(height, y1 + margin),
+    )
+
+
+def plan_edge_artifact_crop(image, recognition=None):
+    """Build a black-edge crop plan guarded by the recognized subject region."""
+    crop, info = detect_black_edge_crop(image)
+    info = dict(info)
+    info["mode"] = "edge_artifact_crop_plan"
+    info["applied"] = False
+    info["rejected_reason"] = None
+    if not info.get("trimmed"):
+        return None, info
+
+    h, w = image.shape[:2]
+    x, y, width, height = crop
+    subject = _recognition_primary_bounds(recognition, w, h)
+    if subject is not None:
+        sx0, sy0, sx1, sy1 = subject
+        info["protected_subject_bbox"] = [sx0, sy0, sx1 - sx0, sy1 - sy0]
+        if x > sx0 or y > sy0 or x + width < sx1 or y + height < sy1:
+            info["rejected_reason"] = "would_clip_recognized_subject"
+            return None, info
+
+    cropped_fraction = 1.0 - ((width * height) / float(w * h))
+    info["cropped_fraction"] = round(float(cropped_fraction), 6)
+    if cropped_fraction > 0.22:
+        info["rejected_reason"] = "crop_fraction_too_large"
+        return None, info
+
+    info["applied"] = True
+    return crop, info
+
+
 def detect_target_crop(image, padding=2.0, max_preview=900):
     """Locate a compact deep-sky structure and return a square crop."""
     source = np.asarray(image, dtype=np.float32)
@@ -876,6 +930,291 @@ def apply_target_aware_safety_rules(cfg, steps, target_type, target_name):
     return cfg, steps, log
 
 
+def apply_low_snr_linear_guards(
+    cfg,
+    *,
+    is_linear_input,
+    effective_target_type,
+    physical_priors,
+    override_params=None,
+):
+    """Bound risky nonlinear parameters for noisy, dark linear captures."""
+    cfg = dict(cfg)
+    log = []
+    if not is_linear_input:
+        return cfg, log
+
+    recommendations = set(physical_priors.get("recommendations") or [])
+    noisy_capture = bool(
+        recommendations.intersection({
+            "warm_sensor_stronger_noise_control",
+            "short_subexposure_expect_read_noise",
+        })
+    )
+    emission_like = effective_target_type == "emission_nebula"
+    if not (noisy_capture or emission_like):
+        return cfg, log
+
+    explicit_stretch = bool(override_params and "stretch_factor" in override_params)
+    if not explicit_stretch:
+        cap = 110.0 if emission_like else 95.0
+        old_stretch = float(cfg.get("stretch_factor", 45.0))
+        if old_stretch > cap:
+            cfg["stretch_factor"] = cap
+            log.append(
+                f"低SNR线性保护: stretch {old_stretch:.1f}→{cap:.1f}"
+            )
+
+    old_target_bg = float(cfg.get("target_bg", 0.08))
+    target_floor = 0.085 if emission_like else 0.075
+    if old_target_bg < target_floor:
+        cfg["target_bg"] = target_floor
+        log.append(
+            f"低SNR线性保护: target_bg {old_target_bg:.3f}→{target_floor:.3f}"
+        )
+
+    old_final_l = float(cfg.get("final_denoise_lum", 0.015))
+    final_cap = 0.010 if emission_like else 0.012
+    if old_final_l > final_cap:
+        cfg["final_denoise_lum"] = final_cap
+        log.append(
+            f"低SNR线性保护: final_denoise_lum {old_final_l:.3f}→{final_cap:.3f}"
+        )
+
+    return cfg, log
+
+
+def apply_marginal_starless_guards(cfg, star_report):
+    """Reduce downstream aggressiveness when StarNet output is only marginal."""
+    cfg = dict(cfg)
+    if not star_report or star_report.get("fallback_applied"):
+        return cfg, []
+    score = float(star_report.get("repair_quality_score", 1.0))
+    damage = float(star_report.get("nebula_damage_ratio", 0.0))
+    if score >= 0.55 and damage <= 0.08:
+        return cfg, []
+
+    log = []
+    old_hdr = float(cfg.get("hdr_strength", 0.35))
+    cfg["hdr_strength"] = min(old_hdr, 0.30)
+    if cfg["hdr_strength"] != old_hdr:
+        log.append(f"StarNet边际保护: HDR {old_hdr:.2f}→{cfg['hdr_strength']:.2f}")
+
+    old_final_l = float(cfg.get("final_denoise_lum", 0.015))
+    cfg["final_denoise_lum"] = min(old_final_l, 0.008)
+    if cfg["final_denoise_lum"] != old_final_l:
+        log.append(
+            f"StarNet边际保护: final_denoise_lum {old_final_l:.3f}→{cfg['final_denoise_lum']:.3f}"
+        )
+
+    old_combine = float(cfg.get("star_combine_strength", 1.0))
+    cfg["star_combine_strength"] = min(old_combine, 0.82)
+    if cfg["star_combine_strength"] != old_combine:
+        log.append(
+            f"StarNet边际保护: star_combine_strength {old_combine:.2f}→{cfg['star_combine_strength']:.2f}"
+        )
+
+    return cfg, log
+
+
+def has_quality_gate(gates, code):
+    return any(gate.get("code") == code for gate in gates)
+
+
+def _dbe_metrics(image):
+    gray = np.mean(image[..., :3], axis=2) if image.ndim == 3 else image
+    cs = max(3, min(gray.shape[0], gray.shape[1]) // 8)
+    corners = [
+        float(np.mean(gray[:cs, :cs])),
+        float(np.mean(gray[:cs, -cs:])),
+        float(np.mean(gray[-cs:, :cs])),
+        float(np.mean(gray[-cs:, -cs:])),
+    ]
+    corner_min = max(min(corners), 1e-10)
+    return {
+        "p1": float(np.percentile(gray, 1.0)),
+        "median": float(np.median(gray)),
+        "nonpositive_pixel_ratio": float(np.mean(gray <= 0)),
+        "corner_means": corners,
+        "corner_uniformity_ratio": float(max(corners) / corner_min),
+    }
+
+
+def _normalize_dbe_candidate(image, low_pctl, high_pctl):
+    candidate = np.clip(np.asarray(image, dtype=np.float32), 0, None)
+    positives = candidate[candidate > 0]
+    p_low = np.percentile(positives, low_pctl) if positives.size else 0.0
+    p_high = np.percentile(candidate, high_pctl)
+    span = p_high - p_low
+    if span > 1e-8:
+        return np.clip((candidate - p_low) / span, 0, 1).astype(np.float32)
+    if candidate.max() > 0:
+        return (candidate / candidate.max()).astype(np.float32)
+    return candidate.astype(np.float32)
+
+
+def _dbe_candidate_plan(cfg, target_type=None):
+    emission_like = target_type == "emission_nebula"
+    base_strength = 0.35 if emission_like else 0.45
+    candidates = [
+        {"method": "polynomial", "degree": 1, "strength": base_strength},
+        {"method": "polynomial", "degree": 2, "strength": base_strength},
+        {"method": "median", "degree": None, "strength": max(base_strength - 0.10, 0.25)},
+    ]
+    configured_method = str(cfg.get("dbe_method", "polynomial")).lower()
+    configured_degree = cfg.get("dbe_degree", 2)
+    configured = {
+        "method": configured_method,
+        "degree": configured_degree if configured_method == "polynomial" else None,
+        "strength": min(base_strength, 0.35) if configured_method == "rbf" else base_strength,
+    }
+    if not any(
+        item["method"] == configured["method"]
+        and item.get("degree") == configured.get("degree")
+        for item in candidates
+    ):
+        candidates.append(configured)
+    if configured_method != "rbf":
+        candidates.append({"method": "rbf", "degree": None, "strength": min(base_strength, 0.35)})
+    return candidates
+
+
+def safe_remove_gradient(image, cfg, target_type=None):
+    """Try conservative DBE candidates and return the safest accepted correction."""
+    source = np.asarray(image, dtype=np.float32)
+    baseline = _dbe_metrics(np.clip(source, 0, 1))
+    low_pctl = cfg.get("dbe_pctl_low", 0.3)
+    high_pctl = cfg.get("dbe_pctl_high", 99.7)
+    reports = []
+    best = None
+
+    for candidate_cfg in _dbe_candidate_plan(cfg, target_type=target_type):
+        method = candidate_cfg["method"]
+        degree = candidate_cfg.get("degree")
+        strength = float(candidate_cfg.get("strength", 0.45))
+        try:
+            _corrected, bg_model = remove_gradient(
+                source,
+                method=method,
+                degree=degree if degree else 2,
+            )
+            corrected = source.astype(np.float64) - np.asarray(bg_model, dtype=np.float64) * strength
+            corrected = _normalize_dbe_candidate(corrected, low_pctl, high_pctl)
+            metrics = _dbe_metrics(corrected)
+            corner_ratio = metrics["corner_uniformity_ratio"]
+            improves_corner = corner_ratio <= baseline["corner_uniformity_ratio"] * 0.95
+            acceptable_corner = (
+                corner_ratio <= 3.0
+                or improves_corner
+            )
+            safe_shadows = (
+                metrics["p1"] > 1e-4
+                and metrics["nonpositive_pixel_ratio"] <= 0.02
+            )
+            if baseline["corner_uniformity_ratio"] <= 3.0:
+                acceptable_corner = corner_ratio <= max(
+                    3.0,
+                    baseline["corner_uniformity_ratio"] * 1.15,
+                )
+            accepted = bool(acceptable_corner and safe_shadows)
+            score = (
+                min(baseline["corner_uniformity_ratio"] - corner_ratio, 6.0)
+                + min(metrics["p1"] * 1000.0, 2.0)
+                - metrics["nonpositive_pixel_ratio"] * 20.0
+            )
+            report = {
+                "method": method,
+                "degree": degree,
+                "strength": round(strength, 3),
+                "accepted": accepted,
+                "score": round(float(score), 4),
+                "metrics": {
+                    "p1": round(metrics["p1"], 6),
+                    "median": round(metrics["median"], 6),
+                    "nonpositive_pixel_ratio": round(metrics["nonpositive_pixel_ratio"], 6),
+                    "corner_uniformity_ratio": round(corner_ratio, 6),
+                    "corner_means": [round(value, 6) for value in metrics["corner_means"]],
+                },
+            }
+            reports.append(report)
+            if accepted and (best is None or score > best["score"]):
+                best = {
+                    "image": corrected,
+                    "score": score,
+                    "report": report,
+                }
+        except Exception as exc:
+            reports.append({
+                "method": method,
+                "degree": degree,
+                "strength": round(strength, 3),
+                "accepted": False,
+                "error": str(exc),
+            })
+
+    report = {
+        "baseline": {
+            "p1": round(baseline["p1"], 6),
+            "median": round(baseline["median"], 6),
+            "nonpositive_pixel_ratio": round(baseline["nonpositive_pixel_ratio"], 6),
+            "corner_uniformity_ratio": round(baseline["corner_uniformity_ratio"], 6),
+            "corner_means": [round(value, 6) for value in baseline["corner_means"]],
+        },
+        "candidates": reports,
+        "selected": None,
+        "status": "skipped_unsafe",
+    }
+    if best is None:
+        return source, report
+
+    report["selected"] = {
+        key: value
+        for key, value in best["report"].items()
+        if key in ("method", "degree", "strength", "score", "metrics")
+    }
+    report["status"] = "applied"
+    return best["image"], report
+
+
+def recover_crushed_background(image, target_type=None):
+    """Lift the display floor once when final metrics show black clipping."""
+    source = np.clip(np.asarray(image, dtype=np.float32), 0, 1)
+    rgb = (
+        source[..., :3]
+        if source.ndim == 3 and source.shape[2] >= 3
+        else source
+    )
+    gray = np.mean(rgb, axis=2) if rgb.ndim == 3 else rgb
+    positive = gray[gray > 0]
+    if positive.size == 0:
+        return source, {"applied": False, "reason": "no_positive_pixels"}
+
+    target_p1 = 0.0012 if target_type == "emission_nebula" else 0.0008
+    current_p1 = float(np.percentile(gray, 1.0))
+    lift = max(0.0, target_p1 - current_p1)
+    if lift <= 0:
+        return source, {"applied": False, "reason": "p1_above_target"}
+
+    shadow_mask = np.clip(1.0 - gray / max(float(np.percentile(gray, 55.0)), 1e-6), 0, 1)
+    shadow_mask = np.power(shadow_mask, 1.4)
+    if source.ndim == 3 and source.shape[2] >= 3:
+        recovered = source.copy()
+        recovered[..., :3] = np.clip(
+            recovered[..., :3] + lift * shadow_mask[..., None],
+            0,
+            1,
+        )
+    else:
+        recovered = np.clip(source + lift * shadow_mask, 0, 1)
+
+    return recovered.astype(np.float32), {
+        "applied": True,
+        "p1_before": round(current_p1, 6),
+        "target_p1": target_p1,
+        "lift": round(float(lift), 6),
+    }
+
+
 def run_pipeline(input_path, output_path, steps=None, preset='medium',
                  save_intermediates=False, work_dir=None,
                  recognize=False, recognize_output=None, recognize_input=False,
@@ -1101,6 +1440,18 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
         else:
             print("[线性输入] 检测到自适应推荐或显式覆盖，保持星点拉伸因子不变")
 
+        cfg, low_snr_log = apply_low_snr_linear_guards(
+            cfg,
+            is_linear_input=True,
+            effective_target_type=target_type,
+            physical_priors=physical_priors,
+            override_params=override_params,
+        )
+        if low_snr_log:
+            safety_log.extend(low_snr_log)
+            for entry in low_snr_log:
+                print(f"    🛡️ {entry}")
+
     # RGBA 处理
     has_alpha = img.ndim == 3 and img.shape[2] == 4
     alpha_channel = None
@@ -1152,9 +1503,33 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
             f"object_bbox={auto_crop_info['object_bbox']}"
         )
     elif crop_bounds is None and auto_crop_edges:
-        crop_bounds, auto_crop_info = detect_black_edge_crop(img)
-        if auto_crop_info['trimmed']:
-            print(f"[自动裁边] edges={auto_crop_info['edges']}")
+        edge_recognition = None
+        if recognize_image is not None:
+            try:
+                edge_recognition = recognize_image(
+                    input_path,
+                    stage="input_edge_crop_plan",
+                    analysis_report=analysis_report,
+                )
+            except Exception as exc:
+                edge_recognition = {"warning": str(exc)}
+                print(f"[自动裁边] 识图裁切规划失败，回退到纯边缘检测: {exc}")
+        crop_bounds, auto_crop_info = plan_edge_artifact_crop(
+            img,
+            recognition=edge_recognition,
+        )
+        auto_crop_info["recognition"] = edge_recognition
+        if auto_crop_info.get('applied'):
+            print(
+                f"[自动裁边] 识图保护后裁切黑边 edges={auto_crop_info['edges']} "
+                f"crop={crop_bounds}"
+            )
+        elif auto_crop_info.get("rejected_reason"):
+            crop_bounds = None
+            print(
+                "[自动裁边] 检测到边缘异常但未裁切: "
+                f"{auto_crop_info['rejected_reason']}"
+            )
         else:
             crop_bounds = None
             print("[自动裁边] 未检测到黑边，保留完整画幅")
@@ -1191,6 +1566,7 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
         original_linear = img.copy()
     selected_style = None
     color_calibration_report = None
+    dbe_report = None
     emission_channel_report = None
     hdr_report = None
     sharpen_report = None
@@ -1251,41 +1627,41 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
         dbe_method = cfg.get('dbe_method', 'polynomial')
         dbe_degree = cfg.get('dbe_degree', 2)
         print("\n─ 线性阶段 ─")
-        print(f"[Phase 1] 背景提取 / 梯度去除 (DBE) [{dbe_method}"
+        print(f"[Phase 1] 背景提取 / 梯度去除 (safe DBE, requested={dbe_method}"
               + (f", degree={dbe_degree}" if dbe_method == 'polynomial' else "")
-              + "]...")
-        current, _ = remove_gradient(
-            current, method=dbe_method,
-            degree=dbe_degree if dbe_degree else 2
+              + ")...")
+        current, dbe_report = safe_remove_gradient(
+            current,
+            cfg,
+            target_type=effective_target_type,
         )
-        current = np.clip(current, 0, None)
-        # 百分位归一化：避免单通道热像素主导归一化
-        p_low = np.percentile(current[current > 0], cfg['dbe_pctl_low']) if np.any(current > 0) else 0
-        p_high = np.percentile(current, cfg['dbe_pctl_high'])
-        span = p_high - p_low
-        if span > 1e-8:
-            current = np.clip((current - p_low) / span, 0, 1)
-        elif current.max() > 0:
-            current = current / current.max()
         save_current('01_dbe.tif')
-        print(f"  ✓ 光害梯度已去除 (归一化: p{cfg['dbe_pctl_low']}→p{cfg['dbe_pctl_high']})")
-
-        # CP1: DBE 后强制四角均匀度检查
-        _gray_dbe = np.mean(current, axis=2) if current.ndim == 3 else current
-        _cs = max(3, min(_gray_dbe.shape[0], _gray_dbe.shape[1]) // 8)
-        _corners_dbe = [
-            float(np.mean(_gray_dbe[:_cs, :_cs])),
-            float(np.mean(_gray_dbe[:_cs, -_cs:])),
-            float(np.mean(_gray_dbe[-_cs:, :_cs])),
-            float(np.mean(_gray_dbe[-_cs:, -_cs:])),
-        ]
-        _min_c = max(min(_corners_dbe), 1e-10)
-        _corner_ratio = max(_corners_dbe) / _min_c
-        _corner_status = '✅' if _corner_ratio < 1.05 else ('⚠️' if _corner_ratio < 3.0 else '❌')
-        print(f"  CP1 四角均匀度: {_corner_status} ratio={_corner_ratio:.2f}x "
-              f"corners={[round(c, 5) for c in _corners_dbe]}")
-        if _corner_ratio >= 3.0:
-            print("  ⚠️ DBE 后四角不均匀度 > 3.0x — 可能需要调整 DBE 参数（degree/method）或检查天体是否靠边")
+        baseline_ratio = dbe_report["baseline"]["corner_uniformity_ratio"]
+        if dbe_report["status"] == "applied":
+            selected = dbe_report["selected"]
+            metrics = selected["metrics"]
+            _corner_ratio = metrics["corner_uniformity_ratio"]
+            _corner_status = '✅' if _corner_ratio < 1.05 else ('⚠️' if _corner_ratio < 3.0 else '❌')
+            print(
+                "  ✓ 安全DBE已应用: "
+                f"method={selected['method']} "
+                f"degree={selected.get('degree')} "
+                f"strength={selected['strength']} "
+                f"corner {baseline_ratio:.2f}x→{_corner_ratio:.2f}x "
+                f"p1={metrics['p1']:.6f}"
+            )
+            print(
+                f"  CP1 四角均匀度: {_corner_status} ratio={_corner_ratio:.2f}x "
+                f"corners={metrics['corner_means']}"
+            )
+        else:
+            safety_log.append(
+                "安全DBE: 所有候选均未同时满足角落改善与暗部安全，跳过背景扣除"
+            )
+            print(
+                "  ⚠️ 安全DBE跳过: 所有候选均不安全，"
+                f"baseline corner={baseline_ratio:.2f}x"
+            )
 
     # 联合中位数、P99 和有效像素比例判断，避免少量亮星或黑边误判。
     decision_source = decision_preview if memory_report["enabled"] else current
@@ -1408,6 +1784,14 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
                     f"  ✓ 去星质量={star_report.get('repair_quality_score', 1.0):.3f} "
                     f"method={star_report.get('repair_method', 'external')}"
                 )
+                cfg, starnet_guard_log = apply_marginal_starless_guards(
+                    cfg,
+                    star_report,
+                )
+                if starnet_guard_log:
+                    safety_log.extend(starnet_guard_log)
+                    for entry in starnet_guard_log:
+                        print(f"    🛡️ {entry}")
         save_artifact('04_starless_linear.tif', starless)
         save_artifact('04_stars_linear.tif', stars)
         try:
@@ -1952,6 +2336,43 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
         target_type=effective_target_type,
         steps=steps,
     )
+    remediation_report = None
+    if has_quality_gate(quality_gates, "BACKGROUND_CRUSHED"):
+        recovered_current, remediation_report = recover_crushed_background(
+            current,
+            target_type=effective_target_type,
+        )
+        if remediation_report.get("applied"):
+            print(
+                "[质量闭环] BACKGROUND_CRUSHED → "
+                f"暗部恢复 lift={remediation_report['lift']:.6f}, "
+                f"p1 {remediation_report['p1_before']:.6f}→target {remediation_report['target_p1']:.6f}"
+            )
+            current = recovered_current
+            if has_alpha:
+                output_current = np.dstack([current[..., :3], alpha_channel])
+            else:
+                output_current = current
+            write_image(
+                output_current,
+                output_path,
+                fits_header=meta.get('header') if is_linear_input else None,
+                data_scale=meta.get('data_scale') if is_linear_input else None,
+                data_offset=meta.get('data_offset') if is_linear_input else None,
+            )
+            output_metrics = calculate_metrics(
+                output_current,
+                {
+                    'processing_stage': 'final',
+                    'linear_star_metrics':
+                        linear_star_metrics if 'linear_star_metrics' in locals() else None
+                },
+            )
+            quality_status, quality_gates = evaluate_quality_gates(
+                output_metrics,
+                target_type=effective_target_type,
+                steps=steps,
+            )
     recognition_ok = run_optional_recognition(
         input_path=input_path,
         output_path=output_path,
@@ -1974,6 +2395,19 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
         }
         for gate in quality_gates
     ]
+    if dbe_report and dbe_report.get("status") == "skipped_unsafe":
+        warnings.append({
+            "code": "DBE_SKIPPED_UNSAFE",
+            "message": "自动背景提取候选未通过角落均匀度与暗部安全检查，已回退为跳过 DBE",
+        })
+    if auto_crop_info and auto_crop_info.get("rejected_reason"):
+        warnings.append({
+            "code": "EDGE_CROP_REJECTED",
+            "message": (
+                "检测到边缘异常，但识图裁切方案会影响主体或裁切过大，"
+                "已保留原始画幅"
+            ),
+        })
     if recognize and not recognition_ok:
         warnings.append({
             "code": "RECOGNITION_FAILED",
@@ -2006,6 +2440,8 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
                 if recognize and recognition_ok else None
             ),
         },
+        "crop": applied_crop,
+        "auto_crop": auto_crop_info,
         "effective_config": {
             "preset": preset,
             "steps": steps,
@@ -2021,6 +2457,7 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
         "physical_priors": physical_priors,
         "astrometry": plate_solution,
         "metrics": output_metrics,
+        "dbe": dbe_report,
         "color_calibration": color_calibration_report,
         "emission_channel_recovery": emission_channel_report,
         "hdr": hdr_report,
@@ -2030,6 +2467,7 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
             star_report if 'star_report' in locals() else None
         ),
         "reference_grade": reference_grade_report,
+        "quality_remediation": remediation_report,
         "quality_policy": quality_policy,
         "quality_gates": quality_gates,
         "warnings": warnings,

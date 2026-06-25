@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: api/Dockerfile
-    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level debug --reload"
     environment:
       STARUN_DATA_ROOT: /data
       STARUN_DATABASE_URL: sqlite:////data/starun.db

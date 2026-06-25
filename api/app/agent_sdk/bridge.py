@@ -580,8 +580,8 @@ class AgentSdkBridge:
             spec.skill_name,
             len(raw),
         )
-        if len(raw) > 64 * 1024:
-            raise SkillOutputError("Skill result exceeds 64 KiB.")
+        if len(raw) > 256 * 1024:
+            raise SkillOutputError("Skill result exceeds 256 KiB.")
         try:
             decoded = json.loads(raw)
             logger.debug(
@@ -610,6 +610,10 @@ class AgentSdkBridge:
                     artifact_store,
                     result.artifacts,
                 )
+                artifacts.insert(
+                    0,
+                    artifact_store.write_bytes("analysis-result.json", raw),
+                )
                 return PublishedSkillRun(
                     artifacts=artifacts,
                     summary={
@@ -617,6 +621,7 @@ class AgentSdkBridge:
                         "model": result.model,
                         "preview": result.preview.model_dump(mode="json"),
                         "analysis": result.analysis.model_dump(mode="json"),
+                        "markdown": result.markdown,
                     },
                 )
             processing_result = ProcessingSkillResult.model_validate_json(raw, strict=True)

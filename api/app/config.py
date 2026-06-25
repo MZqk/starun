@@ -5,6 +5,9 @@ from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+API_ROOT = Path(__file__).resolve().parents[1]
+
+
 class AgentProtocol(StrEnum):
     RESPONSES = "responses"
     CHAT_COMPLETIONS = "chat_completions"
@@ -19,7 +22,7 @@ class Settings(BaseSettings):
     )
 
     database_url: str = "sqlite:///./starun.db"
-    data_root: Path = Path("./data")
+    data_root: Path = API_ROOT / "data"
     analysis_skill_path: Path = Path("../deep-sky-advisor")
     processing_skill_path: Path = Path("../deep-sky-processor")
     agent_max_turns: int = Field(default=15, ge=1)

@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 from skimage.io import imsave
@@ -22,6 +23,12 @@ from agent_protocol import (
 )
 from agent_workflow import apply_action, initialize_session
 from pipeline import run_pipeline
+from pipeline import (
+    apply_low_snr_linear_guards,
+    apply_marginal_starless_guards,
+    recover_crushed_background,
+    safe_remove_gradient,
+)
 
 
 def write_scene(path, background=0.04):
@@ -157,6 +164,77 @@ class AgentProtocolTests(unittest.TestCase):
             self.assertIn("quality_gates", result)
             persisted = json.loads(result_path.read_text(encoding="utf-8"))
             self.assertEqual(persisted["schema_version"], "1.0")
+
+    def test_low_snr_linear_guards_bound_emission_stretch(self):
+        cfg, log = apply_low_snr_linear_guards(
+            {
+                "stretch_factor": 153.0,
+                "target_bg": 0.06,
+                "final_denoise_lum": 0.018,
+            },
+            is_linear_input=True,
+            effective_target_type="emission_nebula",
+            physical_priors={
+                "recommendations": [
+                    "warm_sensor_stronger_noise_control",
+                    "short_subexposure_expect_read_noise",
+                ],
+            },
+        )
+
+        self.assertEqual(cfg["stretch_factor"], 110.0)
+        self.assertGreaterEqual(cfg["target_bg"], 0.085)
+        self.assertLessEqual(cfg["final_denoise_lum"], 0.010)
+        self.assertTrue(log)
+
+    def test_marginal_starnet_guards_reduce_downstream_aggression(self):
+        cfg, log = apply_marginal_starless_guards(
+            {
+                "hdr_strength": 0.45,
+                "final_denoise_lum": 0.018,
+                "star_combine_strength": 1.0,
+            },
+            {
+                "repair_quality_score": 0.45,
+                "nebula_damage_ratio": 0.0883,
+                "fallback_applied": False,
+            },
+        )
+
+        self.assertLessEqual(cfg["hdr_strength"], 0.30)
+        self.assertLessEqual(cfg["final_denoise_lum"], 0.008)
+        self.assertLessEqual(cfg["star_combine_strength"], 0.82)
+        self.assertTrue(log)
+
+    def test_crushed_background_recovery_lifts_p1(self):
+        image = np.zeros((32, 32, 3), dtype=np.float32)
+        image[8:24, 8:24, :] = 0.03
+
+        recovered, report = recover_crushed_background(
+            image,
+            target_type="emission_nebula",
+        )
+        p1 = float(np.percentile(np.mean(recovered[..., :3], axis=2), 1.0))
+
+        self.assertTrue(report["applied"])
+        self.assertGreater(p1, 0.0001)
+
+    def test_safe_dbe_skips_when_all_candidates_crush_background(self):
+        image = np.full((32, 32, 3), 0.04, dtype=np.float32)
+
+        def crushing_remove_gradient(source, **_kwargs):
+            return np.zeros_like(source), np.ones_like(source) * 0.2
+
+        with patch("pipeline.remove_gradient", side_effect=crushing_remove_gradient):
+            corrected, report = safe_remove_gradient(
+                image,
+                {"dbe_method": "rbf", "dbe_degree": 3},
+                target_type="emission_nebula",
+            )
+
+        self.assertEqual(report["status"], "skipped_unsafe")
+        self.assertIsNone(report["selected"])
+        self.assertTrue(np.allclose(corrected, image))
 
     def test_session_executes_one_step_and_waits_for_review(self):
         with tempfile.TemporaryDirectory() as td:

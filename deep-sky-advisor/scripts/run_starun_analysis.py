@@ -248,16 +248,13 @@ def run(source_path, output_dir, result_path, request_path=None):
         shutil.copyfile(source_preview, preview_path)
 
     report_path = output_dir / "analysis-report.json"
-    markdown_path = output_dir / "analysis-processing-report.md"
     markdown = generate_advice.render_markdown(advice)
     report = {
         "schema_version": "starun.analysis-report/v1",
         "source_analysis": analysis,
         "advice": advice,
-        "markdown": markdown,
     }
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    markdown_path.write_text(markdown, encoding="utf-8")
 
     with Image.open(preview_path) as image:
         width, height = image.size
@@ -277,6 +274,7 @@ def run(source_path, output_dir, result_path, request_path=None):
             "upper_percentile_value": 1.0,
         },
         "analysis": professional,
+        "markdown": markdown,
         "artifacts": [
             {"name": report_path.name, "media_type": "application/json"},
             {"name": preview_path.name, "media_type": "image/png"},

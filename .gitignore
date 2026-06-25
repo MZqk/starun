@@ -72,6 +72,7 @@ openspec/
 
 # --- Superpowers Generated Docs ---
 docs/superpowers/
+deep-sky-processor/docs/superpowers/
 docs/feature-audit-*.md
 
 # --- Temporary Screenshots ---
@@ -94,3 +95,7 @@ deep-sky-processor/work_natural/
 
 # --- Deep Sky Advisor Artifacts ---
 deep-sky-advisor/.out/
+
+# --- Temporary Output Dirs ---
+output/
+outputs/

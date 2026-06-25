@@ -83,7 +83,7 @@ class KimiAnalysisClient:
                     "schema": schema,
                 },
             },
-            "thinking": {"type": "disabled"},
+            "thinking": {"type": "enabled"},
             "max_completion_tokens": 5000,
         }
         try:
