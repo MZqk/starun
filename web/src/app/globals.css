@@ -209,6 +209,8 @@ button {
 
 .home-main {
   min-height: calc(100vh - 64px);
+  position: relative;
+  z-index: 2;
 }
 
 .hero {
@@ -1285,6 +1287,8 @@ button {
 .workflow-main {
   min-height: calc(100vh - 64px);
   padding: clamp(3.5rem, 7vw, 6rem) 0 7rem;
+  position: relative;
+  z-index: 2;
 }
 
 .workflow-shell {
@@ -3710,6 +3714,7 @@ div[data-tooltip]:focus-visible {
   justify-content: center;
   padding: 2rem;
   position: relative;
+  z-index: 2;
 }
 
 .not-found-container {

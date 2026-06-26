@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
-import ClientSplashCursor from "../components/ClientSplashCursor";
 import NavBar from "../components/NavBar";
 import StarfieldBackground from "../components/StarfieldBackground";
 import { zhCN } from "../lib/i18n/zh-CN";
@@ -18,7 +17,6 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
     <html lang="zh-CN" data-scroll-behavior="smooth">
       <body className={`${GeistSans.variable} ${GeistMono.variable}`}>
         <StarfieldBackground />
-        <ClientSplashCursor />
         <NavBar />
         {children}
       </body>
