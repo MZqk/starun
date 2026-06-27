@@ -647,6 +647,46 @@ def load_analysis_report(path):
         return None
 
 
+def load_astro_evidence(path_or_payload):
+    if not path_or_payload:
+        return None
+    if isinstance(path_or_payload, dict):
+        return path_or_payload
+    try:
+        with open(path_or_payload, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        return payload if isinstance(payload, dict) else None
+    except Exception as exc:
+        print(f"[WARN] astro evidence unavailable: {exc}")
+        return {
+            "schema_version": "1.0",
+            "warnings": [{"code": "ASTRO_EVIDENCE_LOAD_FAILED", "message": str(exc)}],
+        }
+
+
+def apply_astro_evidence_hints(cfg, color_mode, evidence, override_params=None):
+    if not evidence:
+        return color_mode
+    capture = evidence.get("capture") or {}
+    filter_class = (capture.get("filter") or {}).get("class")
+    if color_mode == "auto" and filter_class in {"dual_band", "narrowband"}:
+        color_mode = "emission"
+        print(f"  [Astropy Evidence] filter_class={filter_class} → color_mode=emission")
+    hints = (evidence.get("priors") or {}).get("parameter_hints") or {}
+    override_params = override_params or {}
+    if (
+        "ghs_protect_strength_min" in hints
+        and "ghs_protect_strength" not in override_params
+    ):
+        old_value = cfg.get("ghs_protect_strength", 0.0)
+        cfg["ghs_protect_strength"] = max(
+            float(old_value),
+            float(hints["ghs_protect_strength_min"]),
+        )
+        print(f"  [Astropy Evidence] ghs_protect_strength: {old_value} → {cfg['ghs_protect_strength']}")
+    return color_mode
+
+
 def build_config_from_analysis(report, base_preset='medium', target_type=None):
     """
     将 analyze.py 的诊断报告映射为 pipeline 配置参数。
@@ -1227,7 +1267,8 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
                  local_strength=0.30, external_detail_strength=0.75,
                  auto_crop_target=False, auto_crop_padding=2.0,
                  auto_crop_edges=True,
-                 analysis_report=None, target_name=None, stretch_method='auto',
+                 analysis_report=None, astro_evidence=None, target_name=None,
+                 stretch_method='auto',
                  use_starnet=False, starnet_path=None, starnet_stride=256,
                  starnet_timeout=900,
                  result_json=None, quality_policy='advisory',
@@ -1248,6 +1289,7 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
     except Exception as exc:
         capture_metadata = {"source": "unavailable", "warning": str(exc)}
     physical_priors = build_physical_priors(capture_metadata)
+    astro_evidence_payload = load_astro_evidence(astro_evidence)
 
     # ── 智能天体属性识别与自适应数据填充 ──
     if not target_name or not target_type:
@@ -1283,6 +1325,13 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
     if color_mode == "auto" and filter_class in ("dual_band", "narrowband"):
         color_mode = "emission"
         print(f"  [物理先验] filter={capture_metadata.get('filter')} → color_mode=emission")
+
+    color_mode = apply_astro_evidence_hints(
+        cfg,
+        color_mode,
+        astro_evidence_payload,
+        override_params=override_params,
+    )
 
     # AI 自适应参数覆盖：以预设为基础，逐参数替换
     if override_params:
@@ -2455,6 +2504,7 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
         },
         "capture_metadata": capture_metadata,
         "physical_priors": physical_priors,
+        "astro_evidence": astro_evidence_payload,
         "astrometry": plate_solution,
         "metrics": output_metrics,
         "dbe": dbe_report,
@@ -2518,6 +2568,7 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
                 'effective_config': result['effective_config'],
                 'capture_metadata': capture_metadata,
                 'physical_priors': physical_priors,
+                'astro_evidence': astro_evidence_payload,
                 'astrometry': plate_solution,
             }, handle, indent=2, ensure_ascii=False)
         result["outputs"]["manifest"] = manifest_path
@@ -2627,6 +2678,8 @@ def main():
                    help='目标天体名称（如 M42、M45、NGC6888），用于激活特定安全规则')
     p.add_argument('--analysis-report', default=None,
                    help='analyze.py 生成的 JSON 诊断报告路径，adaptive 预设时自动读取')
+    p.add_argument('--astro-evidence', default=None,
+                   help='astro_metadata.py 生成的 astro-evidence.json 路径')
     p.add_argument('--color-mode', default='auto',
                    choices=['auto', 'standard', 'emission'])
     p.add_argument('--style', default='auto',
@@ -2764,6 +2817,7 @@ def main():
         auto_crop_padding=args.auto_crop_padding,
         auto_crop_edges=args.auto_crop_edges,
         analysis_report=analysis_report,
+        astro_evidence=args.astro_evidence,
         target_name=target_name,
         stretch_method=args.stretch_method,
         use_starnet=args.use_starnet,

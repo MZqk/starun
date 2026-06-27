@@ -66,3 +66,16 @@ frame. Agent actions may then use:
 
 Do not describe the field inventory as complete unless the supplied catalog is
 known to be complete to the required magnitude and object classes.
+
+## Astropy Evidence contract
+
+`astro-evidence.json` is the shared facts layer for Header, WCS, units, time,
+and coordinate interpretation. FITS Header values must preserve their source
+keyword. Ambiguous units use `camera_native` or `unknown` and lower confidence
+instead of pretending to be physical units. Incomplete WCS may record present
+keywords, but it must not be used for sky-coordinate interpretation.
+
+Default behavior is offline. Do not call `SkyCoord.from_name()`, online
+catalogs, remote FITS reads, IERS auto-refresh, or address resolution unless a
+future explicit opt-in records the service, sent fields, and `network.used=true`
+in the evidence.

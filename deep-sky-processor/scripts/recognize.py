@@ -27,6 +27,7 @@ from fits_io import (
     resolve_celestial_target,
     write_image,
 )
+from astro_metadata import write_astro_evidence
 
 
 SCHEMA_VERSION = "1.0"
@@ -235,6 +236,26 @@ def _load_or_run_analysis(image_path, analysis_report=None):
     return analyze_image(str(image_path))
 
 
+def _astro_evidence_summary(evidence):
+    target = (evidence.get("coordinates") or {}).get("target") or {}
+    wcs = (evidence.get("coordinates") or {}).get("wcs") or {}
+    capture = evidence.get("capture") or {}
+    return {
+        "target_name": target.get("name") or "unknown",
+        "target_ra_deg": target.get("ra_deg"),
+        "target_dec_deg": target.get("dec_deg"),
+        "wcs_available": bool(wcs.get("available")),
+        "pixel_scale_arcsec": wcs.get("pixel_scale_arcsec"),
+        "filter_class": (capture.get("filter") or {}).get("class"),
+        "prior_confidence": (evidence.get("priors") or {}).get("confidence"),
+        "warning_codes": [
+            warning.get("code")
+            for warning in evidence.get("warnings", [])
+            if isinstance(warning, dict)
+        ],
+    }
+
+
 def build_recognition_workflow(image_path, output_dir, analysis_report=None,
                                plate_solution=None, stage="input",
                                target_bg=0.12, gamma=0.45,
@@ -242,6 +263,12 @@ def build_recognition_workflow(image_path, output_dir, analysis_report=None,
     """Build Header/WCS -> diagnostics -> preview -> AI review -> CV bundle."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    astro_evidence_path = output_dir / "astro-evidence.json"
+    astro_evidence = write_astro_evidence(
+        image_path,
+        astro_evidence_path,
+        plate_solution=plate_solution,
+    )
     previews = create_safe_preview_bundle(
         image_path,
         output_dir / "previews",
@@ -290,12 +317,18 @@ def build_recognition_workflow(image_path, output_dir, analysis_report=None,
             "format": Path(image_path).suffix.lstrip(".").lower(),
         },
         "recognition_order": [
+            "astro_evidence",
             "header_wcs",
             "raw_numeric_diagnostics",
             "safe_visual_preview",
             "ai_visual_review",
             "local_cv_auxiliary_validation",
         ],
+        "astro_evidence": {
+            "path": str(astro_evidence_path),
+            "schema_version": astro_evidence.get("schema_version"),
+            "summary": _astro_evidence_summary(astro_evidence),
+        },
         "header_wcs": _header_wcs_evidence(image_path, plate_solution),
         "raw_diagnostics": diagnostics,
         "safe_previews": previews,

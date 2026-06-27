@@ -23,6 +23,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 import pipeline
 import analyze
 import recognize
+import astro_metadata
 
 
 MEDIA_TYPES = {
@@ -165,6 +166,23 @@ def _write_analysis_report(source_path: Path, output_dir: Path) -> dict[str, Any
     return report
 
 
+def _astro_evidence_result_summary(evidence: dict[str, Any]) -> dict[str, Any]:
+    target = (evidence.get("coordinates") or {}).get("target") or {}
+    wcs = (evidence.get("coordinates") or {}).get("wcs") or {}
+    return {
+        "schema_version": evidence.get("schema_version"),
+        "target_name": target.get("name") or "unknown",
+        "wcs_available": bool(wcs.get("available")),
+        "pixel_scale_arcsec": wcs.get("pixel_scale_arcsec"),
+        "prior_confidence": (evidence.get("priors") or {}).get("confidence"),
+        "warning_codes": [
+            warning.get("code")
+            for warning in evidence.get("warnings", [])
+            if isinstance(warning, dict)
+        ],
+    }
+
+
 def _style_prompt(
     inspection: dict[str, Any],
     pipeline_result: dict[str, Any],
@@ -263,6 +281,15 @@ def run(
     result_image_path = output_dir / "result.jpg"
     work_dir = output_dir / "intermediates"
     analysis_report = _write_analysis_report(source_path, output_dir)
+    astro_evidence_path = output_dir / "astro-evidence.json"
+    try:
+        astro_evidence = astro_metadata.write_astro_evidence(source_path, astro_evidence_path)
+    except Exception as exc:
+        astro_evidence = {
+            "schema_version": "1.0",
+            "warnings": [{"code": "ASTRO_EVIDENCE_FAILED", "message": str(exc)}],
+        }
+        _write_json(astro_evidence_path, astro_evidence)
 
     pipeline_result = pipeline.run_pipeline(
         input_path=str(source_path),
@@ -274,6 +301,7 @@ def run(
         style="natural" if style == "realistic" else "auto",
         style_strength=0.8 if style == "realistic" else 1.0,
         analysis_report=analysis_report,
+        astro_evidence=str(astro_evidence_path),
         result_json=str(pipeline_result_path),
         quality_policy="advisory",
     )
@@ -291,6 +319,7 @@ def run(
         _artifact(reference_artifact),
         _artifact(result_image_path.name),
         _artifact(pipeline_result_path.name),
+        _artifact(astro_evidence_path.name),
     ]
     if analysis_report is not None:
         artifacts.append(_artifact("analysis-report.json"))
@@ -330,6 +359,7 @@ def run(
             "pipeline_status": pipeline_status,
             "quality_gates": _jsonable(quality_gates),
             "warnings": _jsonable(warnings),
+            "astro_evidence": _astro_evidence_result_summary(astro_evidence),
             "artifacts": artifacts,
         },
     )

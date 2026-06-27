@@ -20,6 +20,13 @@ def grayscale(image):
     return np.mean(image[..., :3], axis=2, dtype=np.float32)
 
 
+def _evidence_from_manifest(manifest_data):
+    if not manifest_data:
+        return None
+    evidence = manifest_data.get("astro_evidence")
+    return evidence if isinstance(evidence, dict) else None
+
+
 def calculate_metrics(image, manifest_data=None):
     source = np.asarray(image, dtype=np.float32)
     gray = grayscale(source)
@@ -53,6 +60,11 @@ def calculate_metrics(image, manifest_data=None):
 
     # 优先使用线性阶段去星前的干净星点覆盖率
     linear_metrics = manifest_data.get('linear_star_metrics') if manifest_data else None
+    astro_evidence = _evidence_from_manifest(manifest_data)
+    astro_wcs = (
+        (astro_evidence.get("coordinates") or {}).get("wcs") or {}
+        if astro_evidence else {}
+    )
     if linear_metrics and linear_metrics.get('star_area_ratio') is not None:
         star_area = linear_metrics['star_area_ratio']
         star_metric_warning = None
@@ -108,8 +120,18 @@ def calculate_metrics(image, manifest_data=None):
     if linear_metrics:
         if linear_metrics.get('estimated_fwhm') is not None:
             res['linear_estimated_fwhm_px'] = round(linear_metrics['estimated_fwhm'], 2)
+            pixel_scale = astro_wcs.get("pixel_scale_arcsec")
+            if astro_wcs.get("available") and pixel_scale is not None:
+                res["linear_estimated_fwhm_arcsec"] = round(
+                    float(linear_metrics["estimated_fwhm"]) * float(pixel_scale),
+                    3,
+                )
         if linear_metrics.get('n_stars_detected') is not None:
             res['linear_n_stars_detected'] = linear_metrics['n_stars_detected']
+    if astro_evidence:
+        res["astro_wcs_available"] = bool(astro_wcs.get("available"))
+        if astro_wcs.get("pixel_scale_arcsec") is not None:
+            res["astro_pixel_scale_arcsec"] = astro_wcs.get("pixel_scale_arcsec")
     if star_metric_warning:
         res['warnings'] = [star_metric_warning]
 
@@ -122,6 +144,7 @@ def main():
     parser.add_argument("input")
     parser.add_argument("--output")
     parser.add_argument("--manifest", default=None, help="manifest.json 路径")
+    parser.add_argument("--astro-evidence", default=None, help="astro-evidence.json 路径")
     args = parser.parse_args()
 
     # 尝试加载 manifest
@@ -147,6 +170,15 @@ def main():
                 print(f"[质量量化] 成功加载关联的元数据: {manifest_path}")
         except Exception as e:
             print(f"[质量量化 WARN] 无法解析 {manifest_path}: {e}")
+
+    if args.astro_evidence:
+        try:
+            evidence_payload = json.loads(Path(args.astro_evidence).read_text(encoding="utf-8"))
+            if manifest_data is None:
+                manifest_data = {}
+            manifest_data["astro_evidence"] = evidence_payload
+        except Exception as exc:
+            print(f"[质量量化 WARN] 无法解析 astro evidence {args.astro_evidence}: {exc}")
 
     image, _meta = read_image(args.input)
     payload = calculate_metrics(image, manifest_data)
