@@ -7,6 +7,12 @@ description: |
   只作为诊断、可控图像变换和量化审查工具。适用于发射星云、反射星云、
   星系、星团、行星状星云、暗星云、宽场星野的真实风格美化、拉伸、
   去光害、校色、降噪、缩星、细节增强和最终 JPG 输出。
+allowed-tools:
+  - Bash
+  - Read
+  - Write
+  - Glob
+  - Grep
 ---
 
 # Deep Sky Processor

@@ -1114,7 +1114,12 @@ def _dbe_candidate_plan(cfg, target_type=None):
         for item in candidates
     ):
         candidates.append(configured)
-    if configured_method != "rbf":
+    if configured_method == "rbf" and not bool(cfg.get("_dbe_skip_rbf", False)):
+        # already included above
+        pass
+    elif not bool(cfg.get("_dbe_skip_rbf", False)) and not any(
+        item["method"] == "rbf" for item in candidates
+    ):
         candidates.append({"method": "rbf", "degree": None, "strength": min(base_strength, 0.35)})
     return candidates
 
