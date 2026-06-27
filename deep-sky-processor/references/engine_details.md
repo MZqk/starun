@@ -1,5 +1,9 @@
 # 星点处理引擎、FITS I/O 与质量指标细节
 
+OpenCV 与 scikit-image 的使用边界见 `references/cv_guardrails.md`。本文件中的
+星点检测、修复、形态学和质量指标必须保留图像状态、位深、颜色顺序和坐标约定，
+不得把 CV 指标误写成真实细节或物理分辨率结论。
+
 ## 星点处理引擎 v2
 
 `scripts/star_tools.py` 已升级为多尺度检测引擎：
@@ -28,6 +32,11 @@
 - **默认**：OpenCV Telea 快速行进法（小/中星点）
 - **大区域/星芒**：自动降级为 Navier-Stokes 流体动力学修复
 - **OpenCV 不可用时**：回退到高斯模糊修复
+
+inpaint 只能用于有界星点修复。默认自动阈值：`star_mask_confidence >= 0.30`；
+星云/星系 `mask_coverage_ratio <= 0.08`，星团 `<= 0.03`；最大连通域面积
+`<= 1.5%` 全幅；接触边缘的 mask 面积 `<= 20%`；默认修复半径 `<= 5px`，
+`> 8px` 必须审查。超出阈值时优先外部无星图或人工审查。
 
 ### 置信度系统
 `detect_stars_multiscale()` 返回 `confidence`（0-1）：

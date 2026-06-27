@@ -13,6 +13,9 @@
 - 当 `quality_metrics.py` 收到 `astro-evidence.json` 时，可报告像素尺度和
   `linear_estimated_fwhm_arcsec`。这些字段只在 WCS 有效时出现。没有本地星表和测光模型时，
   色彩真实性仍是启发式审查，不得声称完成严格测光校准。
+- CV 指标解释必须遵守 `references/cv_guardrails.md`。`edge_energy_delta`、
+  `high_frequency_energy_ratio`、component count、CLAHE 前后差异和 mask 统计只能作为
+  halo、硬边、过锐化、过度分割或 mask 过宽风险，不得单独宣称真实细节增加。
 
 ## 推荐审查顺序
 

@@ -98,6 +98,10 @@ AI 的职责：
 - **FITS I/O 精度保护（v2）**：绝对值归一化、float32 输出防止精度丢失与分层色块。
 - **质量审查标准**：`median`、`corner_uniformity_ratio` 等各项数值质量门禁与视觉 Critic 审查标准。
 
+OpenCV / scikit-image 相关操作必须遵守 [cv_guardrails.md](references/cv_guardrails.md)：
+保留线性/非线性/预览状态，禁止 preview/uint8 回流处理，明确 RGB/BGR 与
+row/col vs x/y 坐标，inpaint 和 mask 必须满足覆盖率、置信度和天体类型安全规则。
+
 Astropy Evidence 层会为 FITS 支持的输入生成 `astro-evidence.json`。该文件记录
 FITS HDU、Header、WCS、目标坐标、拍摄时间、单位化曝光/焦距/像元等科学元数据，
 以及可降级的物理先验。识别、adaptive 管线、质量审查和 Starun 输出应优先消费
