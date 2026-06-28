@@ -166,23 +166,6 @@ def _write_analysis_report(source_path: Path, output_dir: Path) -> dict[str, Any
     return report
 
 
-def _astro_evidence_result_summary(evidence: dict[str, Any]) -> dict[str, Any]:
-    target = (evidence.get("coordinates") or {}).get("target") or {}
-    wcs = (evidence.get("coordinates") or {}).get("wcs") or {}
-    return {
-        "schema_version": evidence.get("schema_version"),
-        "target_name": target.get("name") or "unknown",
-        "wcs_available": bool(wcs.get("available")),
-        "pixel_scale_arcsec": wcs.get("pixel_scale_arcsec"),
-        "prior_confidence": (evidence.get("priors") or {}).get("confidence"),
-        "warning_codes": [
-            warning.get("code")
-            for warning in evidence.get("warnings", [])
-            if isinstance(warning, dict)
-        ],
-    }
-
-
 def _style_prompt(
     inspection: dict[str, Any],
     pipeline_result: dict[str, Any],
@@ -359,7 +342,6 @@ def run(
             "pipeline_status": pipeline_status,
             "quality_gates": _jsonable(quality_gates),
             "warnings": _jsonable(warnings),
-            "astro_evidence": _astro_evidence_result_summary(astro_evidence),
             "artifacts": artifacts,
         },
     )

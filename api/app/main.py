@@ -26,6 +26,44 @@ from app.uploads.router import router as uploads_router
 
 load_dotenv()
 
+_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+_DEBUG_LOGGERS = (
+    "app",
+    "agents",
+    "agents.extensions",
+    "agents.sandbox",
+    "httpcore",
+    "httpx",
+    "openai",
+    "openai._base_client",
+    "openai.agents",
+    "openai.agents.tracing",
+    "openai-agents",
+)
+
+
+def _resolve_log_level() -> int:
+    configured = os.getenv("STARUN_LOG_LEVEL")
+    if configured:
+        return getattr(logging, configured.upper(), logging.INFO)
+    uvicorn_level = logging.getLogger("uvicorn.error").getEffectiveLevel()
+    if uvicorn_level <= logging.DEBUG:
+        return logging.DEBUG
+    return logging.INFO
+
+
+def configure_logging() -> int:
+    level = _resolve_log_level()
+    logging.basicConfig(
+        level=level,
+        format=_LOG_FORMAT,
+        force=True,
+    )
+    child_level = logging.DEBUG if level <= logging.DEBUG else logging.INFO
+    for name in _DEBUG_LOGGERS:
+        logging.getLogger(name).setLevel(child_level)
+    return level
+
 
 def _application_session_factory() -> sessionmaker[Session]:
     return db_session_module._application_session_factory
@@ -138,13 +176,5 @@ def create_app(
     return application
 
 
-_log_level = os.getenv("STARUN_LOG_LEVEL", "INFO").upper()
-logging.basicConfig(
-    level=getattr(logging, _log_level, logging.INFO),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    force=True,
-)
-for _name in ("agents", "openai", "httpx", "app"):
-    logging.getLogger(_name).setLevel(logging.DEBUG if _log_level == "DEBUG" else logging.INFO)
-
+configure_logging()
 app = create_app()

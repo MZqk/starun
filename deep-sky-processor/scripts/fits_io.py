@@ -355,9 +355,9 @@ def _read_fits(filepath, force_linear=False):
     读取 FITS 文件，返回 float32 数组、header 和缩放信息。
 
     归一化策略（force_linear=False 时）：
-      1. 应用 BSCALE/BZERO 标定
-      2. 取数据绝对值最大值作为 scale
-      3. data = data / scale（保留负值，不做截断）
+      1. 从未缩放原始像素应用一次 BSCALE/BZERO 标定
+      2. 以标定后的最低值作为背景偏移
+      3. data = (data - offset) / (max - min)
 
     与旧版不同：
       - 不再使用 p0.1-p99.9 百分位裁剪，避免丢失原始线性范围和测光信息
@@ -365,7 +365,7 @@ def _read_fits(filepath, force_linear=False):
     """
     from astropy.io import fits
 
-    hdul = fits.open(filepath, memmap=False)
+    hdul = fits.open(filepath, memmap=False, do_not_scale_image_data=True)
 
     # 查找包含图像数据的 HDU
     data = None
@@ -395,7 +395,7 @@ def _read_fits(filepath, force_linear=False):
     # 记录原始统计（在 NaN 处理前）
     data_min = float(np.min(data))
     data_max = float(np.max(data))
-    data_absmax = max(abs(data_min), abs(data_max), 1e-12)
+    data_range = max(data_max - data_min, 1e-12)
 
     # 转换为 float32
     data = data.astype(np.float32)
@@ -424,11 +424,12 @@ def _read_fits(filepath, force_linear=False):
         # 保持线性范围，不做归一化
         print(f"[FITS] 保持原始线性范围: [{data_min:.3e}, {data_max:.3e}]")
     else:
-        # 使用绝对值最大值归一化（保留完整动态范围，不截断 tails）
-        norm_scale = data_absmax
+        # 以物理数据的低端作为背景偏移归一化，避免 BZERO 等偏置量压缩有效信号。
+        norm_offset = data_min
+        norm_scale = data_range
         if norm_scale > 1e-12:
-            data = data / norm_scale
-            print(f"[FITS] 归一化: scale={norm_scale:.3e}  "
+            data = (data - norm_offset) / norm_scale
+            print(f"[FITS] 归一化: offset={norm_offset:.3e} scale={norm_scale:.3e}  "
                   f"原始范围=[{data_min:.3e}, {data_max:.3e}] → "
                   f"归一化后=[{float(np.min(data)):.4f}, {float(np.max(data)):.4f}]")
         else:

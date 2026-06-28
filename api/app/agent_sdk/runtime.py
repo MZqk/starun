@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import cast
 import logging
+import os
 
 from agents import Agent, RunConfig, Runner
 from agents.sandbox import Dir, Manifest
@@ -14,14 +15,26 @@ from agents.sandbox.types import ExecResult
 from app.agent_sdk.runtime_types import AgentSdkRunSpec, EventEmitter
 
 logger = logging.getLogger(__name__)
-_LOG_TEXT_LIMIT = 4000
+_DEFAULT_LOG_TEXT_LIMIT = 64 * 1024
+_LOG_LINE_CHUNK_SIZE = 2000
 
 
-def _log_text(value: bytes) -> str:
+def _debug_log_text_limit() -> int:
+    configured = os.getenv("STARUN_DEBUG_LOG_TEXT_LIMIT")
+    if configured is None:
+        return _DEFAULT_LOG_TEXT_LIMIT
+    try:
+        return max(0, int(configured))
+    except ValueError:
+        return _DEFAULT_LOG_TEXT_LIMIT
+
+
+def _decode_log_stream(value: bytes) -> tuple[str, bool]:
     text = value.decode("utf-8", errors="replace").strip()
-    if len(text) <= _LOG_TEXT_LIMIT:
-        return text
-    return text[:_LOG_TEXT_LIMIT] + "... <truncated>"
+    limit = _debug_log_text_limit()
+    if len(text) <= limit:
+        return text, False
+    return text[:limit], True
 
 
 def _manifest_with_skill(spec: AgentSdkRunSpec) -> Manifest:
@@ -61,6 +74,14 @@ class OpenAiSandboxRuntime:
         )
         if spec.agent is None:
             raise RuntimeError("OpenAI sandbox runtime requires an agent")
+        logger.debug(
+            "Calling OpenAI Agents Runner: task_id=%s agent=%s skill=%s max_turns=%s input_chars=%s",
+            spec.task_id,
+            spec.agent_name,
+            spec.skill_name,
+            spec.max_turns,
+            len(spec.input_text),
+        )
         result = await Runner.run(
             cast(Agent[None], spec.agent),
             input=spec.input_text,
@@ -72,6 +93,13 @@ class OpenAiSandboxRuntime:
                 workflow_name=spec.agent_name,
                 group_id=spec.task_id,
             ),
+        )
+        logger.debug(
+            "OpenAI Agents Runner completed: task_id=%s agent=%s skill=%s result_type=%s",
+            spec.task_id,
+            spec.agent_name,
+            spec.skill_name,
+            type(result).__name__,
         )
         await emit(
             "tool_finished",
@@ -244,13 +272,56 @@ def _log_exec_result(spec: AgentSdkRunSpec, result: ExecResult) -> None:
     if not logger.isEnabledFor(logging.DEBUG):
         return
     logger.debug(
-        "Direct skill entrypoint finished: task_id=%s skill=%s exit_code=%s stdout=%r stderr=%r",
+        "Direct skill entrypoint finished: task_id=%s skill=%s exit_code=%s stdout_bytes=%s stderr_bytes=%s",
         spec.task_id,
         spec.skill_name,
         result.exit_code,
-        _log_text(result.stdout),
-        _log_text(result.stderr),
+        len(result.stdout),
+        len(result.stderr),
     )
+    _log_exec_stream(spec, "stdout", result.stdout)
+    _log_exec_stream(spec, "stderr", result.stderr)
+
+
+def _log_exec_stream(spec: AgentSdkRunSpec, stream_name: str, value: bytes) -> None:
+    text, truncated = _decode_log_stream(value)
+    if not text:
+        logger.debug(
+            "Direct skill %s is empty: task_id=%s skill=%s",
+            stream_name,
+            spec.task_id,
+            spec.skill_name,
+        )
+        return
+    logger.debug(
+        "Direct skill %s captured: task_id=%s skill=%s chars=%s truncated=%s",
+        stream_name,
+        spec.task_id,
+        spec.skill_name,
+        len(text),
+        truncated,
+    )
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if len(line) <= _LOG_LINE_CHUNK_SIZE:
+            logger.debug(
+                "Direct skill %s: task_id=%s skill=%s line=%s text=%s",
+                stream_name,
+                spec.task_id,
+                spec.skill_name,
+                line_number,
+                line,
+            )
+            continue
+        for chunk_number, start in enumerate(range(0, len(line), _LOG_LINE_CHUNK_SIZE), start=1):
+            logger.debug(
+                "Direct skill %s: task_id=%s skill=%s line=%s chunk=%s text=%s",
+                stream_name,
+                spec.task_id,
+                spec.skill_name,
+                line_number,
+                chunk_number,
+                line[start : start + _LOG_LINE_CHUNK_SIZE],
+            )
 
 
 def _processing_entrypoint_command(spec: AgentSdkRunSpec) -> str:

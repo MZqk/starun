@@ -1,4 +1,5 @@
 import json
+import logging
 
 from app.agent_sdk.bridge import AgentSdkBridge
 from app.agent_sdk import runtime as runtime_module
@@ -229,6 +230,39 @@ def test_direct_analysis_runtime_command_targets_starun_entrypoint(tmp_path) -> 
     assert "scripts/run_starun_analysis.py" in command
     assert "../../input/source.xisf" in command
     assert "Runner.run" not in command
+
+
+def test_direct_skill_exec_result_logs_streams_as_lines(caplog, monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("STARUN_DEBUG_LOG_TEXT_LIMIT", "5000")
+    source = tmp_path / "source.fits"
+    source.write_bytes(b"fits")
+    settings = Settings(
+        _env_file=None,
+        ai_api_key="test-key",
+        processing_skill_path=tmp_path / "deep-sky-processor",
+    )
+    settings.processing_skill_path.mkdir()
+    spec = AgentSdkBridge(settings).build_processing_spec(
+        task_id="task-log",
+        source_path=source,
+        inspection=_inspection(),
+        style=ProcessingStyle.REALISTIC,
+    )
+    result = ExecResult(
+        stdout=("phase 1\n" + ("x" * 2100)).encode(),
+        stderr=b"warning 1\nwarning 2",
+        exit_code=0,
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="app.agent_sdk.runtime"):
+        runtime_module._log_exec_result(spec, result)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("stdout_bytes=" in message and "stderr_bytes=" in message for message in messages)
+    assert any("Direct skill stdout:" in message and "line=1 text=phase 1" in message for message in messages)
+    assert any("Direct skill stdout:" in message and "line=2 chunk=1" in message for message in messages)
+    assert any("Direct skill stdout:" in message and "line=2 chunk=2" in message for message in messages)
+    assert any("Direct skill stderr:" in message and "line=2 text=warning 2" in message for message in messages)
 
 
 @pytest.mark.asyncio

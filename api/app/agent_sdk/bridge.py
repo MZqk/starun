@@ -312,6 +312,17 @@ class AgentSdkBridge:
             negative_prompt: str,
             risk_notes: list[str],
         ) -> str:
+            logger.debug(
+                "Artistic agent requested image generation: task_id=%s target_chars=%s visible_subject_chars=%s "
+                "quality_note_count=%s prompt_chars=%s negative_prompt_chars=%s risk_note_count=%s",
+                spec.task_id,
+                len(target_summary),
+                len(visible_subject),
+                len(quality_notes),
+                len(generation_prompt),
+                len(negative_prompt),
+                len(risk_notes),
+            )
             direction = ArtDirection(
                 target_summary=target_summary,
                 visible_subject=visible_subject,
@@ -335,6 +346,12 @@ class AgentSdkBridge:
                     direction=direction,
                 )
             except ImageProviderError as exc:
+                logger.exception(
+                    "Image provider call failed: task_id=%s provider=tencent-hunyuan code=%s retryable=%s",
+                    spec.task_id,
+                    exc.code,
+                    exc.retryable,
+                )
                 tool_error = SkillExecutionError(
                     str(exc),
                     retryable=exc.retryable,
@@ -374,6 +391,18 @@ class AgentSdkBridge:
                 direction_artifact=direction_artifact,
                 image_artifact=image_artifact,
                 generation_record=generation_record,
+            )
+            logger.debug(
+                "Image provider call completed: task_id=%s provider=tencent-hunyuan request_id=%s "
+                "media_type=%s width=%s height=%s provider_width=%s provider_height=%s bytes=%s",
+                spec.task_id,
+                generated.provider_request_id,
+                generated.media_type,
+                generated.width,
+                generated.height,
+                generated.provider_width,
+                generated.provider_height,
+                len(generated.data),
             )
             await emit(
                 "tool_finished",
@@ -434,20 +463,34 @@ class AgentSdkBridge:
                     "detail": "low",
                 }
             )
+        context_text = json.dumps(
+            context,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
         user_content.append(
             {
                 "type": "input_text",
-                "text": json.dumps(
-                    context,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ),
+                "text": context_text,
             }
         )
         await emit("run_started", {"agent": agent.name})
         await emit(
             "tool_started",
             {"step_id": "01", "tool_name": "kimi.art_direction"},
+        )
+        logger.debug(
+            "Calling artistic OpenAI Agents Runner: task_id=%s agent=%s model=%s protocol=%s "
+            "max_turns=%s image_input=%s preview_width=%s preview_height=%s context_chars=%s",
+            spec.task_id,
+            agent.name,
+            self._settings.ai_model,
+            self._settings.agent_protocol.value,
+            spec.max_turns,
+            _supports_image_input(self._settings.ai_base_url),
+            preview.width,
+            preview.height,
+            len(context_text),
         )
         task = asyncio.create_task(
             Runner.run(
@@ -477,11 +520,24 @@ class AgentSdkBridge:
                     raise AgentRunCancelled("agent_run_cancelled")
                 await asyncio.sleep(self._poll_interval_seconds)
             await task
+            logger.debug(
+                "Artistic OpenAI Agents Runner completed: task_id=%s agent=%s state_keys=%s",
+                spec.task_id,
+                agent.name,
+                sorted(state),
+            )
         except (MaxTurnsExceeded, ModelBehaviorError) as exc:
+            logger.exception("Artistic agent run was rejected: task_id=%s", spec.task_id)
             raise AgentGuardrailError("Artistic agent run was rejected.") from exc
         except (APITimeoutError, APIConnectionError, RateLimitError) as exc:
+            logger.exception("Artistic OpenAI provider call failed: task_id=%s retryable=true", spec.task_id)
             raise AgentProviderError(str(exc), retryable=True) from exc
         except APIStatusError as exc:
+            logger.exception(
+                "Artistic OpenAI provider returned status error: task_id=%s status_code=%s",
+                spec.task_id,
+                exc.status_code,
+            )
             raise AgentProviderError(
                 str(exc),
                 retryable=exc.status_code == 429 or exc.status_code >= 500,
@@ -490,6 +546,7 @@ class AgentSdkBridge:
             tool_error = state.get("tool_error")
             if isinstance(tool_error, SkillExecutionError):
                 raise tool_error from exc
+            logger.exception("Artistic agent user/tool error: task_id=%s", spec.task_id)
             raise
         finally:
             if not task.done():

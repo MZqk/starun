@@ -99,3 +99,8 @@ deep-sky-advisor/.out/
 # --- Temporary Output Dirs ---
 output/
 outputs/
+
+# --- Deep Sky Processing Run Artifacts ---
+NGC6888_*
+recognition.json
+recognition_workflow/
