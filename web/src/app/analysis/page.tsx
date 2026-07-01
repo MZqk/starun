@@ -608,7 +608,7 @@ export default function AnalysisPage() {
         setAnalysisResult({
           taskId,
           markdown,
-          error: markdown ? null : "analysis-result.json 缺少 markdown 字段。",
+          error: markdown ? null : "分析结果缺少可显示的报告内容。",
         });
       })
       .catch((caught) => {
@@ -616,7 +616,7 @@ export default function AnalysisPage() {
         setAnalysisResult({
           taskId,
           markdown: null,
-          error: caught instanceof Error ? caught.message : "analysis-result.json 读取失败。",
+          error: caught instanceof Error ? caught.message : "分析结果没有读取成功。",
         });
       });
     return () => {
@@ -673,23 +673,56 @@ export default function AnalysisPage() {
           <span className="section-kicker">{copy.kicker}</span>
           <h1>{copy.title}</h1>
           <p>{copy.description}</p>
+          <p className="workflow-start-note">{copy.firstRunNote}</p>
         </header>
 
         {!taskId ? (
-          <>
-            <UploadZone initialFile={initialFile} onUploaded={handleUploaded} />
-            <div className="workflow-action-row">
-              <button
-                className="button button--primary"
-                disabled={!upload || creating}
-                onClick={() => void createTask()}
-                type="button"
-              >
-                {creating ? copy.creating : copy.create}
-              </button>
-              <span>{copy.quotaNotice}</span>
+          <section className="workflow-setup" aria-label={copy.setupAriaLabel}>
+            <div className={`setup-step ${upload ? "is-complete" : ""}`}>
+              <span className="setup-step__marker" aria-hidden="true">1</span>
+              <div className="setup-step__body">
+                <div className="setup-step__intro">
+                  <strong>{copy.setupSourceTitle}</strong>
+                  <span>{copy.setupSourceHint}</span>
+                </div>
+                <UploadZone initialFile={initialFile} onUploaded={handleUploaded} />
+              </div>
             </div>
-          </>
+
+            <div className={`setup-step ${upload ? "is-complete" : ""}`}>
+              <span className="setup-step__marker" aria-hidden="true">2</span>
+              <div className="setup-step__body">
+                <div className="setup-step__intro">
+                  <strong>{copy.setupCheckTitle}</strong>
+                  <span>{upload ? copy.setupCheckReady : copy.setupCheckHint}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className={`setup-step setup-step--action ${upload ? "is-complete" : ""}`}>
+              <span className="setup-step__marker" aria-hidden="true">3</span>
+              <div className="setup-step__body">
+                <div className="setup-step__intro">
+                  <strong>{copy.setupCreateTitle}</strong>
+                  <span>{copy.setupCreateHint}</span>
+                </div>
+                <div className="workflow-action-row">
+                  <button
+                    className="button button--primary"
+                    disabled={!upload || creating}
+                    onClick={() => void createTask()}
+                    type="button"
+                  >
+                    {creating ? copy.creating : copy.create}
+                  </button>
+                  <div className="workflow-action-help" aria-live="polite">
+                    <strong>{upload ? copy.readyToCreate : copy.uploadRequired}</strong>
+                    <span>{copy.quotaNotice}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
         ) : null}
 
         <TaskStatusPanel
@@ -703,11 +736,11 @@ export default function AnalysisPage() {
           <div className="recovery-panel">
             <div className="border-mask" aria-hidden="true" />
             <div className="recovery-header">
-              <span className="recovery-badge">FAULT_RECOVERY_ENGAGED</span>
-              <h3>分析任务执行未成功</h3>
+              <span className="recovery-badge">可以重试</span>
+              <h3>这次分析没有完成</h3>
             </div>
             <p className="recovery-desc">
-              线性 FITS 文件统计或 AI 解读未能在算力节点中完成解析。此文件可能包含非标准或损坏的 HDU 数据，或者服务端连接已超时。您可以重新上传文件，或重试该任务以再次启动分析。
+              还没有生成可用的分析结果。当前页面会保留已选择的文件；先重试一次，如果仍失败，再重新选择文件。
             </p>
             <div className="recovery-actions">
               <button
@@ -715,7 +748,7 @@ export default function AnalysisPage() {
                 onClick={resetToUpload}
                 type="button"
               >
-                重新上传 FITS
+                重新选择文件
               </button>
               <button
                 className="button button--primary"
@@ -723,7 +756,7 @@ export default function AnalysisPage() {
                 onClick={() => void retryCurrentTask()}
                 type="button"
               >
-                {retrying ? "正在重新排队..." : "重试分析任务"}
+                {retrying ? "正在重新排队…" : "重试分析"}
               </button>
             </div>
           </div>

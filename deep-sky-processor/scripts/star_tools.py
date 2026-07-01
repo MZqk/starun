@@ -1110,16 +1110,28 @@ def separate_stars(image, method='inpaint', star_threshold=0.85, inpaint_radius=
                     star_mask = _star_layer_mask(stars)
                     
                     report = estimate_star_removal_quality(image, starless)
-                    starnet_quality_ok = (
-                        report['repair_quality_score'] >= min_quality_score
-                        and report['nebula_damage_ratio'] <= 0.20
+                    star_signal = np.mean(stars, axis=2) if stars.ndim == 3 else stars
+                    star_layer_p99 = float(np.percentile(star_signal, 99.0))
+                    star_layer_nonzero = float(np.mean(star_signal > 1e-4))
+                    starnet_quality_ok = bool(
+                        report['nebula_damage_ratio'] <= 0.12
+                        and star_layer_p99 > 0.01
+                        and np.all(np.isfinite(starless))
                     )
                     report.update({
                         'accepted': starnet_quality_ok,
                         'fallback_applied': not starnet_quality_ok,
                         'source': 'starnet',
                         'starnet_execution': starnet_report,
+                        'starnet_acceptance_policy': 'neural_starless_safe_stretch',
+                        'star_layer_p99': round(star_layer_p99, 4),
+                        'star_layer_nonzero_ratio': round(star_layer_nonzero, 4),
                     })
+                    if starnet_quality_ok:
+                        report['needs_starnet_plus'] = False
+                        if report.get('repair_quality_score', 0.0) < 0.7:
+                            report['quality'] = 'accepted_marginal'
+                        report.pop('suggestion', None)
                     if starnet_quality_ok:
                         stars = gaussian_filter(stars, sigma=0.8)
                         result = (starless, stars, star_mask)

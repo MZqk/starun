@@ -35,13 +35,13 @@ export default function TaskEventLog({
     const translatedTool = processingCopy.toolNames[toolName] || toolName;
 
     if (latestEvent.event_type === "agent_tool_started") {
-      text = `开始执行处理步骤：${translatedTool}`;
+      text = `开始处理：${translatedTool}`;
     } else if (latestEvent.event_type === "agent_tool_finished") {
-      text = `完成处理步骤：${translatedTool}`;
+      text = `完成处理：${translatedTool}`;
     } else if (latestEvent.event_type === "task_completed") {
-      text = "图像自动处理任务已完成";
+      text = "图像处理已完成";
     } else if (latestEvent.event_type === "task_failed") {
-      text = "图像处理失败";
+      text = "图像处理没有完成";
     }
 
     if (text && text !== lastAnnouncementRef.current) {

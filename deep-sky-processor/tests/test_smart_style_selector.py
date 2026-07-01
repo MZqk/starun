@@ -70,6 +70,19 @@ class TestBaseProfileMapping(unittest.TestCase):
         r = []
         self.assertEqual(_select_base_profile(None, "emission", r), "dramatic_nebula")
 
+    def test_ngc6888_uses_warm_dust_profile(self):
+        r = []
+        self.assertEqual(
+            _select_base_profile(
+                "emission_nebula",
+                "emission",
+                r,
+                target_name="NGC6888",
+            ),
+            "emission_warm_dust",
+        )
+        self.assertIn("emission_warm_dust", r[0])
+
     def test_color_mode_narrowband(self):
         r = []
         self.assertEqual(_select_base_profile(None, "narrowband", r), "dramatic_nebula")
@@ -215,6 +228,42 @@ class TestChooseStyleProfileIntegration(unittest.TestCase):
         self.assertLess(adapted["saturation"], STYLE_PROFILES["dramatic_nebula"]["saturation"])
         self.assertLess(adapted["micro_contrast"], STYLE_PROFILES["dramatic_nebula"]["micro_contrast"])
         self.assertGreater(adapted["black_floor"], STYLE_PROFILES["dramatic_nebula"]["black_floor"])
+
+    def test_widefield_emission_diagnostics_use_warm_dust(self):
+        diag = {
+            "brightness": {
+                "darkness_level": "extreme_dark",
+                "is_practically_black": True,
+                "dynamic_range_ratio": 4.9,
+            },
+            "noise": {"noise_level": "very_low"},
+            "color": {"color_health_effective": "emission_dominant"},
+            "gradient": {
+                "gradient_severity": "none",
+                "dbe_method_recommendation": "skip",
+            },
+            "starfield": {"star_density": "dense"},
+            "recommendations": {
+                "overall": {"strategy": "emission_rgb"},
+            },
+            "sharpness": {"sharpness_level": "sharp"},
+        }
+        name, adapted, reasons = choose_style_profile(
+            target_type="emission_nebula",
+            color_mode="emission",
+            diagnostic_report=diag,
+        )
+        self.assertEqual(name, "emission_warm_dust")
+        self.assertIsNotNone(adapted)
+        self.assertLess(
+            STYLE_PROFILES["emission_warm_dust"]["saturation"],
+            STYLE_PROFILES["dramatic_nebula"]["saturation"],
+        )
+        self.assertLess(
+            STYLE_PROFILES["emission_warm_dust"]["background_desat"],
+            STYLE_PROFILES["dramatic_nebula"]["background_desat"],
+        )
+        self.assertTrue(any("emission_warm_dust" in r for r in reasons))
 
     def test_planetary_with_diagnostics(self):
         diag = {

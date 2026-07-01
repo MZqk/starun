@@ -244,8 +244,8 @@ export default function UploadZone({
           {isOnline ? (
             <p>{copy.description}</p>
           ) : (
-            <p className="upload-zone__offline-warn" style={{ color: "var(--color-space-accent)", fontWeight: "600" }}>
-              ⚠️ {copy.offlineError}
+            <p className="upload-zone__offline-warn">
+              {copy.offlineError}
             </p>
           )}
         </div>

@@ -24,8 +24,10 @@ from agent_protocol import (
 from agent_workflow import apply_action, initialize_session
 from pipeline import run_pipeline
 from pipeline import (
+    _dbe_candidate_plan,
     apply_low_snr_linear_guards,
     apply_marginal_starless_guards,
+    protect_style_background_floor,
     recover_crushed_background,
     safe_remove_gradient,
 )
@@ -219,6 +221,20 @@ class AgentProtocolTests(unittest.TestCase):
         self.assertTrue(report["applied"])
         self.assertGreater(p1, 0.0001)
 
+    def test_style_background_floor_lifts_low_emission_median(self):
+        image = np.full((32, 32, 3), 0.025, dtype=np.float32)
+        image[10:22, 10:22, 0] = 0.18
+
+        protected, report = protect_style_background_floor(
+            image,
+            target_type="emission_nebula",
+        )
+        median = float(np.median(np.mean(protected[..., :3], axis=2)))
+
+        self.assertTrue(report["applied"])
+        self.assertGreaterEqual(median, 0.04)
+        self.assertLessEqual(float(np.max(protected)), 1.0)
+
     def test_safe_dbe_skips_when_all_candidates_crush_background(self):
         image = np.full((32, 32, 3), 0.04, dtype=np.float32)
 
@@ -235,6 +251,23 @@ class AgentProtocolTests(unittest.TestCase):
         self.assertEqual(report["status"], "skipped_unsafe")
         self.assertIsNone(report["selected"])
         self.assertTrue(np.allclose(corrected, image))
+
+    def test_emission_dbe_plan_does_not_add_rbf_by_default(self):
+        plan = _dbe_candidate_plan(
+            {"dbe_method": "polynomial", "dbe_degree": 1},
+            target_type="emission_nebula",
+        )
+
+        self.assertEqual({item["method"] for item in plan}, {"polynomial"})
+        self.assertLessEqual(max(item["strength"] for item in plan), 0.25)
+
+    def test_emission_dbe_plan_requires_explicit_rbf_opt_in(self):
+        plan = _dbe_candidate_plan(
+            {"dbe_method": "rbf", "_dbe_allow_rbf": True},
+            target_type="emission_nebula",
+        )
+
+        self.assertIn("rbf", {item["method"] for item in plan})
 
     def test_session_executes_one_step_and_waits_for_review(self):
         with tempfile.TemporaryDirectory() as td:

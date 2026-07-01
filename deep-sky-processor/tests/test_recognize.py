@@ -73,6 +73,7 @@ class RecognizeCliTests(unittest.TestCase):
             self.assertEqual(
                 payload["recognition_order"],
                 [
+                    "astro_evidence",
                     "header_wcs",
                     "raw_numeric_diagnostics",
                     "safe_visual_preview",

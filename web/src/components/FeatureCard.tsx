@@ -3,12 +3,6 @@ import Link from "next/link";
 import { ArrowIcon } from "./Icons";
 
 export type FeatureCardVariant = "primary" | "secondary" | "horizontal";
-export type FeatureTagTone = "amber" | "sage" | "dusty";
-
-type FeatureTag = {
-  label: string;
-  tone: FeatureTagTone;
-};
 
 type FeatureCardProps = {
   title: string;
@@ -16,7 +10,6 @@ type FeatureCardProps = {
   href: string;
   linkLabel: string;
   icon: ReactNode;
-  tags: readonly FeatureTag[];
   variant: FeatureCardVariant;
 };
 
@@ -26,7 +19,6 @@ export default function FeatureCard({
   href,
   linkLabel,
   icon,
-  tags,
   variant,
 }: FeatureCardProps) {
   return (
@@ -42,13 +34,6 @@ export default function FeatureCard({
           <p>{description}</p>
         </div>
         <div className="feature-card__footer">
-          <div className="feature-tags" aria-hidden="true">
-            {tags.map((tag) => (
-              <span className={`feature-tag feature-tag--${tag.tone}`} key={tag.label}>
-                {tag.label}
-              </span>
-            ))}
-          </div>
           <Link className="feature-link" href={href}>
             {linkLabel}
             <ArrowIcon />
@@ -58,4 +43,3 @@ export default function FeatureCard({
     </article>
   );
 }
-

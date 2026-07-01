@@ -39,13 +39,6 @@ export default function HomePage() {
     fileInputRef.current?.click();
   };
 
-  const handleUploadCardKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      fileInputRef.current?.click();
-    }
-  };
-
   useEffect(() => {
     let dragCounter = 0;
 
@@ -141,10 +134,6 @@ export default function HomePage() {
             <aside
               className="upload-signal"
               aria-label={home.uploadSignal.title}
-              role="button"
-              tabIndex={0}
-              onClick={handleUploadCardClick}
-              onKeyDown={handleUploadCardKeyDown}
             >
               <div className="border-mask" aria-hidden="true" />
               <input
@@ -153,6 +142,12 @@ export default function HomePage() {
                 onChange={handleFileChange}
                 accept=".fits,.fit,.fts,.xisf"
                 style={{ display: "none" }}
+              />
+              <button
+                aria-label={home.uploadSignal.action}
+                className="upload-signal__hit-area"
+                onClick={handleUploadCardClick}
+                type="button"
               />
               <div className="upload-signal__orb" aria-hidden="true">
                 <UploadIcon size={25} />
@@ -174,13 +169,13 @@ export default function HomePage() {
               <div className={`upload-diagnostic-bar ${uploadError ? "has-error" : ""}`} aria-hidden="true">
                 <span className="diagnostic-dot"></span>
                 <span className="diagnostic-line"></span>
-                <span className="diagnostic-text" tabIndex={0} data-tooltip={uploadError ? "仅支持 .fits, .fit, .fts, .xisf 格式的天文图像源文件" : "准备好解析 FITS HDU 或 XISF 图像数据"}>
-                  {uploadError ? "ERR_FILE_REJECTED" : "READY_TO_PARSE_HDU"}
+                <span className="diagnostic-text">
+                  {uploadError ? "文件格式不支持" : "准备检查天文图像"}
                 </span>
               </div>
               {uploadError && (
                 <div className="diagnostic-error-desc" role="alert">
-                  [!] LIMIT_FORMAT: ONLY_.FITS_.FIT_.FTS_.XISF_ALLOWED
+                  请选择 .fits、.fit、.fts 或 .xisf 文件。
                 </div>
               )}
             </aside>
@@ -199,11 +194,6 @@ export default function HomePage() {
                 href="/analysis"
                 icon={<OrbitIcon />}
                 linkLabel={home.features.analysis.link}
-                tags={[
-                  { label: home.features.analysis.tags[0], tone: "amber" },
-                  { label: home.features.analysis.tags[1], tone: "sage" },
-                  { label: home.features.analysis.tags[2], tone: "dusty" },
-                ]}
                 title={home.features.analysis.title}
                 variant="primary"
               />
@@ -212,10 +202,6 @@ export default function HomePage() {
                 href="/processing"
                 icon={<SparkIcon />}
                 linkLabel={home.features.processing.link}
-                tags={[
-                  { label: home.features.processing.tags[0], tone: "sage" },
-                  { label: home.features.processing.tags[1], tone: "dusty" },
-                ]}
                 title={home.features.processing.title}
                 variant="secondary"
               />
@@ -224,53 +210,10 @@ export default function HomePage() {
                 href="/history"
                 icon={<HistoryIcon />}
                 linkLabel={home.features.history.link}
-                tags={[
-                  { label: home.features.history.tags[0], tone: "amber" },
-                  { label: home.features.history.tags[1], tone: "sage" },
-                ]}
                 title={home.features.history.title}
                 variant="horizontal"
               />
             </div>
-          </div>
-        </section>
-
-        <section className="steps-section" aria-label={home.steps.ariaLabel}>
-          <div className="page-shell">
-            <div className="section-heading section-heading--center">
-              <h2>{home.steps.heading}</h2>
-            </div>
-            <ol className="steps-list">
-              {home.steps.items.map((step, index) => {
-                return (
-                  <li key={step.title}>
-                    <div className="step-badge">
-                      <span className="step-number">{String(index + 1).padStart(2, '0')}</span>
-                      <span className="step-code">SYS_STEP_0{index + 1}</span>
-                    </div>
-                    <div className="step-content">
-                      <h3>{step.title}</h3>
-                      <p>{step.description}</p>
-                      <div className="step-meta">
-                        {index === 0 ? (
-                          <code>
-                            INPUT: FITS_RAW_DATA | VERIFY: <span tabIndex={0} data-tooltip="Header Data Unit (文件头数据单元)，FITS 文件中的独立数据块">HDU_STRUCTURE</span>
-                          </code>
-                        ) : index === 1 ? (
-                          <code>
-                            METHOD: AI_DEEP_ADVISOR | ENGINE: <span tabIndex={0} data-tooltip="集成了专为天文图像定制优化的智能参数建议引擎">KIMI_INTELLIGENT</span>
-                          </code>
-                        ) : (
-                          <code>
-                            OUTPUT: L1_CALIBRATED_REPORT | <span tabIndex={0} data-tooltip="校准处理完毕后，可下载高动态范围的 TIFF 格式或 PNG 预览图">ARTIFACT_PNG_TIFF</span>
-                          </code>
-                        )}
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ol>
           </div>
         </section>
 
@@ -282,7 +225,7 @@ export default function HomePage() {
                   <span className="section-kicker">{home.faq.kicker}</span>
                   <h3>
                     {home.faq.title}
-                    <svg className="faq-summary__icon" fill="none" height="16" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" width="16" style={{ marginLeft: "8px", verticalAlign: "middle", transition: "transform 200ms ease" }}>
+                    <svg className="faq-summary__icon" fill="none" height="16" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" width="16">
                       <path d="M19 9l-7 7-7-7" />
                     </svg>
                   </h3>
@@ -303,17 +246,17 @@ export default function HomePage() {
         <section className="privacy-section">
           <div className="page-shell privacy-layout">
             <div className="privacy-card">
-              <div className="sandbox-badge" tabIndex={0} data-tooltip="所有天文图像处理都在您浏览器的本地沙盒环境中运行，数据绝对安全">
+              <div className="sandbox-badge">
                 <span className="sandbox-badge__dot"></span>
-                <span className="sandbox-badge__text">LOCAL_SANDBOX_ACTIVE // NO_USER_DATA_LOGGED</span>
+                <span className="sandbox-badge__text">仅保存任务摘要，不记录用户数据</span>
               </div>
               <h2>{home.privacy.heading}</h2>
               <p>{home.privacy.body}</p>
             </div>
             <div className="resource-panel-minimal">
               <div className="resource-header">
-                <span className="resource-header__title">HARDWARE_CONSTRAINTS</span>
-                <span className="resource-header__status" tabIndex={0} data-tooltip="本地 CPU 运算性能有限，建议单次仅上传单个 FITS 图像">CPU_LIMITED</span>
+                <span className="resource-header__title">资源限制</span>
+                <span className="resource-header__status">建议单文件处理</span>
               </div>
               <p className="resource-note">{home.privacy.resource}</p>
             </div>

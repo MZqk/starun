@@ -1095,29 +1095,37 @@ def _normalize_dbe_candidate(image, low_pctl, high_pctl):
 
 def _dbe_candidate_plan(cfg, target_type=None):
     emission_like = target_type == "emission_nebula"
-    base_strength = 0.35 if emission_like else 0.45
+    base_strength = 0.25 if emission_like else 0.45
     candidates = [
         {"method": "polynomial", "degree": 1, "strength": base_strength},
         {"method": "polynomial", "degree": 2, "strength": base_strength},
-        {"method": "median", "degree": None, "strength": max(base_strength - 0.10, 0.25)},
     ]
+    if not emission_like:
+        candidates.append(
+            {"method": "median", "degree": None, "strength": max(base_strength - 0.10, 0.25)}
+        )
     configured_method = str(cfg.get("dbe_method", "polynomial")).lower()
     configured_degree = cfg.get("dbe_degree", 2)
+    allow_rbf = bool(cfg.get("_dbe_allow_rbf", False))
+    skip_rbf = bool(cfg.get("_dbe_skip_rbf", False)) or (
+        emission_like and not allow_rbf
+    )
     configured = {
         "method": configured_method,
         "degree": configured_degree if configured_method == "polynomial" else None,
         "strength": min(base_strength, 0.35) if configured_method == "rbf" else base_strength,
     }
-    if not any(
-        item["method"] == configured["method"]
-        and item.get("degree") == configured.get("degree")
-        for item in candidates
-    ):
-        candidates.append(configured)
-    if configured_method == "rbf" and not bool(cfg.get("_dbe_skip_rbf", False)):
+    if configured_method != "rbf" or not skip_rbf:
+        if not any(
+            item["method"] == configured["method"]
+            and item.get("degree") == configured.get("degree")
+            for item in candidates
+        ):
+            candidates.append(configured)
+    if configured_method == "rbf" and not skip_rbf:
         # already included above
         pass
-    elif not bool(cfg.get("_dbe_skip_rbf", False)) and not any(
+    elif not skip_rbf and not any(
         item["method"] == "rbf" for item in candidates
     ):
         candidates.append({"method": "rbf", "degree": None, "strength": min(base_strength, 0.35)})
@@ -1256,6 +1264,64 @@ def recover_crushed_background(image, target_type=None):
         "applied": True,
         "p1_before": round(current_p1, 6),
         "target_p1": target_p1,
+        "lift": round(float(lift), 6),
+    }
+
+
+def protect_style_background_floor(image, target_type=None):
+    """Keep non-generative style grading from pushing the final background too low."""
+    source = np.clip(np.asarray(image, dtype=np.float32), 0, 1)
+    rgb = (
+        source[..., :3]
+        if source.ndim == 3 and source.shape[2] >= 3
+        else source
+    )
+    gray = np.mean(rgb, axis=2) if rgb.ndim == 3 else rgb
+    current_median = float(np.median(gray))
+    target_median = 0.045 if target_type == "emission_nebula" else 0.030
+    if current_median >= target_median:
+        return source, {
+            "applied": False,
+            "reason": "median_above_floor",
+            "median_before": round(current_median, 6),
+            "target_median": target_median,
+        }
+
+    shadow_reference = max(float(np.percentile(gray, 90.0)), current_median + 1e-6)
+    shadow_mask = np.clip(1.0 - gray / shadow_reference, 0, 1)
+    shadow_mask = np.power(shadow_mask, 1.2)
+    background_mask = gray <= current_median + 1e-6
+    mask_response = (
+        float(np.median(shadow_mask[background_mask]))
+        if np.any(background_mask)
+        else float(np.median(shadow_mask))
+    )
+    lift = min((target_median - current_median) / max(mask_response, 0.25), 0.035)
+    if source.ndim == 3 and source.shape[2] >= 3:
+        protected = source.copy()
+        protected[..., :3] = np.clip(
+            protected[..., :3] + lift * shadow_mask[..., None],
+            0,
+            1,
+        )
+    else:
+        protected = np.clip(source + lift * shadow_mask, 0, 1)
+
+    protected_rgb = (
+        protected[..., :3]
+        if protected.ndim == 3 and protected.shape[2] >= 3
+        else protected
+    )
+    protected_gray = (
+        np.mean(protected_rgb, axis=2)
+        if protected_rgb.ndim == 3
+        else protected_rgb
+    )
+    return protected.astype(np.float32), {
+        "applied": True,
+        "median_before": round(current_median, 6),
+        "median_after": round(float(np.median(protected_gray)), 6),
+        "target_median": target_median,
         "lift": round(float(lift), 6),
     }
 
@@ -1625,6 +1691,7 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
     hdr_report = None
     sharpen_report = None
     reference_grade_report = None
+    style_background_floor_report = None
     external_starless_linear = None
     if external_full is not None:
         external_starless_linear = external_full
@@ -1799,6 +1866,7 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
     star_removal_fallback = False
     valid_starless_layer = False
     linear_star_mask_val = None
+    starnet_pre_stretched = False
     if 'star_remove' in steps:
         print("\n[Phase 4] 去星 (StarNet-like, 线性数据)...")
         if (
@@ -1817,8 +1885,44 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
             print(f"  ✓ 使用外部无星图: {external_starless}")
         else:
             star_method = 'starnet' if use_starnet else 'inpaint'
+            star_remove_input = current
+            if use_starnet and is_very_dark:
+                print(
+                    "  ⚠️ 极暗线性数据不直接送入 StarNet，"
+                    "先生成安全拉伸 StarNet 输入"
+                )
+                starnet_method = 'emission' if effective_color_mode == 'emission' else 'very_dark'
+                if starnet_method == 'emission':
+                    star_remove_input = apply_luminance_stretch(
+                        current,
+                        method='emission',
+                        shadow_pctl=cfg.get('shadow_pctl', 1.0),
+                        highlight_pctl=cfg.get('highlight_pctl', 99.94),
+                        gamma=cfg.get('stretch_gamma', 0.43),
+                        target_bg=cfg.get('target_bg', 0.08),
+                        min_p99=cfg.get('stretch_min_p99', 0.5),
+                    )
+                else:
+                    star_remove_input = apply_luminance_stretch(
+                        current,
+                        method='very_dark',
+                        factor=cfg.get('stretch_factor', 25.0),
+                        gamma=cfg.get('stretch_gamma', 0.45),
+                        shadow_pctl=cfg.get('shadow_pctl', 0.1),
+                        highlight_pctl=cfg.get('highlight_pctl', 99.5),
+                        target_bg=cfg.get('target_bg', 0.12),
+                        min_p99=cfg.get('stretch_min_p99', 0.5),
+                    )
+                star_remove_input = save_artifact(
+                    '04_starnet_input_stretched.tif',
+                    star_remove_input,
+                )
+                starnet_pre_stretched = True
+                safety_log.append(
+                    "StarNet: 极暗线性输入已改用安全拉伸图层，避免 16-bit 暗部量化与质量误判"
+                )
             starless, stars, star_mask, star_report = separate_stars(
-                current, method=star_method,
+                star_remove_input, method=star_method,
                 star_threshold=cfg['star_threshold'],
                 inpaint_radius=5,
                 return_report=True,
@@ -1828,12 +1932,19 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
             )
             if star_report.get('fallback_applied'):
                 star_removal_fallback = True
+                if starnet_pre_stretched:
+                    starless = None
+                    stars = None
+                    starnet_pre_stretched = False
                 print(
                     f"  ⚠️ 去星已回退: {star_report.get('fallback_reason')}，"
                     "后续流程保留原始星点"
                 )
             else:
                 valid_starless_layer = True
+                if starnet_pre_stretched:
+                    star_report = dict(star_report)
+                    star_report['input_domain'] = 'safe_stretched'
                 print(
                     f"  ✓ 去星质量={star_report.get('repair_quality_score', 1.0):.3f} "
                     f"method={star_report.get('repair_method', 'external')}"
@@ -1846,8 +1957,18 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
                     safety_log.extend(starnet_guard_log)
                     for entry in starnet_guard_log:
                         print(f"    🛡️ {entry}")
-        save_artifact('04_starless_linear.tif', starless)
-        save_artifact('04_stars_linear.tif', stars)
+        if starless is not None:
+            starless_name = (
+                '04_starless_stretched.tif'
+                if starnet_pre_stretched else '04_starless_linear.tif'
+            )
+            save_artifact(starless_name, starless)
+        if stars is not None:
+            stars_name = (
+                '04_stars_stretched.tif'
+                if starnet_pre_stretched else '04_stars_linear.tif'
+            )
+            save_artifact(stars_name, stars)
         try:
             gray_linear = np.mean(current[..., :3], axis=2) if current.ndim == 3 else current
             fwhm_est = 4.0
@@ -1869,124 +1990,133 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
     # Phase 5: 拉伸 (线性→非线性, 对去星图像)
     stretch_target = starless if starless is not None else current
     if 'stretch' in steps:
-        # 1. 自适应确定拉伸方法
-        effective_method = stretch_method
-        if effective_method == 'auto':
-            if effective_color_mode == 'emission' and star_removal_fallback:
-                effective_method = 'masked_ghs'
-                print(
-                    "[自适应] 去星回退且保留密集星场，"
-                    "改用 masked_ghs 保护星核与背景"
-                )
-            elif effective_color_mode == 'emission':
-                effective_method = 'emission'
-            elif cfg.get('stretch_method') not in (None, 'auto'):
-                effective_method = cfg['stretch_method']
-            elif is_very_dark:
-                effective_method = 'very_dark'
-            elif effective_target_type in ('galaxy', 'emission_nebula', 'planetary_nebula'):
-                effective_method = 'masked_ghs'
-                print(f"[自适应] 识别为高动态范围天体 ({effective_target_type})，自动升级为 masked_ghs 拉伸以保护高光核心")
-            else:
-                effective_method = 'masked'
-        resolved_stretch_method = effective_method
-
-        # 2. 执行拉伸分发
-        print(f"\n[Phase 5] 拉伸 (亮度通道 {effective_method} 拉伸)...")
-        if effective_method == 'emission':
-            stretch_target = apply_luminance_stretch(
-                stretch_target,
-                method='emission',
-                shadow_pctl=cfg.get('shadow_pctl', 1.0),
-                highlight_pctl=cfg.get('highlight_pctl', 99.94),
-                gamma=cfg.get('stretch_gamma', 0.43),
-                target_bg=cfg.get('target_bg', 0.08),
-                min_p99=cfg.get('stretch_min_p99', 0.5),
-            )
+        if starnet_pre_stretched:
+            resolved_stretch_method = 'starnet_pre_stretched'
+            current = stretch_target
+            save_current('05_stretched_starless.tif')
             print(
-                f"  ✓ Emission stretch shadow={cfg.get('shadow_pctl', 1.0)} "
-                f"highlight={cfg.get('highlight_pctl', 99.94)} "
-                f"gamma={cfg.get('stretch_gamma', 0.43)} "
-                f"target_bg={cfg.get('target_bg', 0.08)} "
-                f"min_p99={cfg.get('stretch_min_p99', 0.5)}"
-            )
-        elif effective_method == 'very_dark':
-            stretch_target = apply_luminance_stretch(
-                stretch_target,
-                method='very_dark',
-                factor=cfg.get('stretch_factor', 25.0),
-                gamma=cfg.get('stretch_gamma', 0.45),
-                shadow_pctl=cfg.get('shadow_pctl', 0.1),
-                highlight_pctl=cfg.get('highlight_pctl', 99.5),
-                target_bg=cfg.get('target_bg', 0.12),
-                min_p99=cfg.get('stretch_min_p99', 0.5),
-            )
-            print(
-                f"  ✓ Very-dark stretch factor={cfg.get('stretch_factor', 25.0)} "
-                f"gamma={cfg.get('stretch_gamma', 0.45)} "
-                f"target_bg={cfg.get('target_bg', 0.12)}"
-            )
-        elif effective_method == 'deep':
-            stretch_target = apply_luminance_stretch(
-                stretch_target,
-                method='deep',
-                shadow_pctl=cfg.get('shadow_pctl', 2.0),
-                highlight_pctl=cfg.get('highlight_pctl', 99.9),
-                gamma=cfg.get('stretch_gamma', 0.35),
-            )
-            print(f"  ✓ Deep stretch shadow={cfg.get('shadow_pctl', 2.0)} highlight={cfg.get('highlight_pctl', 99.9)} gamma={cfg.get('stretch_gamma', 0.35)}")
-        elif effective_method == 'ghs':
-            sp_val = cfg.get('ghs_sp', 0.01)
-            b_val = resolve_ghs_b(cfg)
-            stretch_target = apply_luminance_stretch(
-                stretch_target,
-                method='ghs',
-                sp=sp_val,
-                b=b_val,
-                c=cfg.get('ghs_c', 0.0)
-            )
-            print(f"  ✓ GHS stretch sp={sp_val} b={b_val:.2f} c={cfg.get('ghs_c', 0.0)}")
-        elif effective_method == 'masked_ghs':
-            sp_val = cfg.get('ghs_sp', -1)
-            b_val = resolve_ghs_b(cfg)
-            prot_val = cfg.get('ghs_protect_strength', 0.5)
-            if target_name and 'M42' in str(target_name).upper():
-                prot_val = max(prot_val, 0.75)
-            stretch_target = apply_luminance_stretch(
-                stretch_target,
-                method='masked_ghs',
-                sp=sp_val,
-                b=b_val,
-                protect_strength=prot_val,
-                target_bg=cfg.get('target_bg', 0.08),
-                shadow_pctl=cfg.get('shadow_pctl', 0.0),
-                highlight_pctl=cfg.get('highlight_pctl', 99.9),
-                gamma=cfg.get('stretch_gamma', 0.45),
-            )
-            print(
-                f"  ✓ Masked GHS stretch sp={sp_val} b={b_val:.2f} "
-                f"protect={prot_val} target_bg={cfg.get('target_bg', 0.08)} "
-                f"shadow={cfg.get('shadow_pctl', 0.0)} "
-                f"highlight={cfg.get('highlight_pctl', 99.9)} "
-                f"gamma={cfg.get('stretch_gamma', 0.45)}"
+                "\n[Phase 5] 拉伸已跳过：StarNet 输入已安全拉伸，"
+                "继续使用无星非线性图层"
             )
         else:
-            method_kwargs = {}
-            if effective_method == 'masked':
-                method_kwargs = {'factor': cfg['stretch_factor'], 'target_bg': cfg.get('target_bg', 0.08)}
-            elif effective_method == 'mtf':
-                method_kwargs = {'midtones': cfg.get('midtones', 0.3)}
-            elif effective_method == 'arcsinh':
-                method_kwargs = {'factor': cfg['stretch_factor']}
-            stretch_target = apply_luminance_stretch(
-                stretch_target,
-                method=effective_method,
-                **method_kwargs
-            )
-            print(f"  ✓ {effective_method} stretch kwargs={method_kwargs}")
+        # 1. 自适应确定拉伸方法
+            effective_method = stretch_method
+            if effective_method == 'auto':
+                if effective_color_mode == 'emission' and star_removal_fallback:
+                    effective_method = 'masked_ghs'
+                    print(
+                        "[自适应] 去星回退且保留密集星场，"
+                        "改用 masked_ghs 保护星核与背景"
+                    )
+                elif effective_color_mode == 'emission':
+                    effective_method = 'emission'
+                elif cfg.get('stretch_method') not in (None, 'auto'):
+                    effective_method = cfg['stretch_method']
+                elif is_very_dark:
+                    effective_method = 'very_dark'
+                elif effective_target_type in ('galaxy', 'emission_nebula', 'planetary_nebula'):
+                    effective_method = 'masked_ghs'
+                    print(f"[自适应] 识别为高动态范围天体 ({effective_target_type})，自动升级为 masked_ghs 拉伸以保护高光核心")
+                else:
+                    effective_method = 'masked'
+            resolved_stretch_method = effective_method
 
-        current = stretch_target
-        save_current('05_stretched_starless.tif')
+        # 2. 执行拉伸分发
+            print(f"\n[Phase 5] 拉伸 (亮度通道 {effective_method} 拉伸)...")
+            if effective_method == 'emission':
+                stretch_target = apply_luminance_stretch(
+                    stretch_target,
+                    method='emission',
+                    shadow_pctl=cfg.get('shadow_pctl', 1.0),
+                    highlight_pctl=cfg.get('highlight_pctl', 99.94),
+                    gamma=cfg.get('stretch_gamma', 0.43),
+                    target_bg=cfg.get('target_bg', 0.08),
+                    min_p99=cfg.get('stretch_min_p99', 0.5),
+                )
+                print(
+                    f"  ✓ Emission stretch shadow={cfg.get('shadow_pctl', 1.0)} "
+                    f"highlight={cfg.get('highlight_pctl', 99.94)} "
+                    f"gamma={cfg.get('stretch_gamma', 0.43)} "
+                    f"target_bg={cfg.get('target_bg', 0.08)} "
+                    f"min_p99={cfg.get('stretch_min_p99', 0.5)}"
+                )
+            elif effective_method == 'very_dark':
+                stretch_target = apply_luminance_stretch(
+                    stretch_target,
+                    method='very_dark',
+                    factor=cfg.get('stretch_factor', 25.0),
+                    gamma=cfg.get('stretch_gamma', 0.45),
+                    shadow_pctl=cfg.get('shadow_pctl', 0.1),
+                    highlight_pctl=cfg.get('highlight_pctl', 99.5),
+                    target_bg=cfg.get('target_bg', 0.12),
+                    min_p99=cfg.get('stretch_min_p99', 0.5),
+                )
+                print(
+                    f"  ✓ Very-dark stretch factor={cfg.get('stretch_factor', 25.0)} "
+                    f"gamma={cfg.get('stretch_gamma', 0.45)} "
+                    f"target_bg={cfg.get('target_bg', 0.12)}"
+                )
+            elif effective_method == 'deep':
+                stretch_target = apply_luminance_stretch(
+                    stretch_target,
+                    method='deep',
+                    shadow_pctl=cfg.get('shadow_pctl', 2.0),
+                    highlight_pctl=cfg.get('highlight_pctl', 99.9),
+                    gamma=cfg.get('stretch_gamma', 0.35),
+                )
+                print(f"  ✓ Deep stretch shadow={cfg.get('shadow_pctl', 2.0)} highlight={cfg.get('highlight_pctl', 99.9)} gamma={cfg.get('stretch_gamma', 0.35)}")
+            elif effective_method == 'ghs':
+                sp_val = cfg.get('ghs_sp', 0.01)
+                b_val = resolve_ghs_b(cfg)
+                stretch_target = apply_luminance_stretch(
+                    stretch_target,
+                    method='ghs',
+                    sp=sp_val,
+                    b=b_val,
+                    c=cfg.get('ghs_c', 0.0)
+                )
+                print(f"  ✓ GHS stretch sp={sp_val} b={b_val:.2f} c={cfg.get('ghs_c', 0.0)}")
+            elif effective_method == 'masked_ghs':
+                sp_val = cfg.get('ghs_sp', -1)
+                b_val = resolve_ghs_b(cfg)
+                prot_val = cfg.get('ghs_protect_strength', 0.5)
+                if target_name and 'M42' in str(target_name).upper():
+                    prot_val = max(prot_val, 0.75)
+                stretch_target = apply_luminance_stretch(
+                    stretch_target,
+                    method='masked_ghs',
+                    sp=sp_val,
+                    b=b_val,
+                    protect_strength=prot_val,
+                    target_bg=cfg.get('target_bg', 0.08),
+                    shadow_pctl=cfg.get('shadow_pctl', 0.0),
+                    highlight_pctl=cfg.get('highlight_pctl', 99.9),
+                    gamma=cfg.get('stretch_gamma', 0.45),
+                )
+                print(
+                    f"  ✓ Masked GHS stretch sp={sp_val} b={b_val:.2f} "
+                    f"protect={prot_val} target_bg={cfg.get('target_bg', 0.08)} "
+                    f"shadow={cfg.get('shadow_pctl', 0.0)} "
+                    f"highlight={cfg.get('highlight_pctl', 99.9)} "
+                    f"gamma={cfg.get('stretch_gamma', 0.45)}"
+                )
+            else:
+                method_kwargs = {}
+                if effective_method == 'masked':
+                    method_kwargs = {'factor': cfg['stretch_factor'], 'target_bg': cfg.get('target_bg', 0.08)}
+                elif effective_method == 'mtf':
+                    method_kwargs = {'midtones': cfg.get('midtones', 0.3)}
+                elif effective_method == 'arcsinh':
+                    method_kwargs = {'factor': cfg['stretch_factor']}
+                stretch_target = apply_luminance_stretch(
+                    stretch_target,
+                    method=effective_method,
+                    **method_kwargs
+                )
+                print(f"  ✓ {effective_method} stretch kwargs={method_kwargs}")
+
+            current = stretch_target
+            save_current('05_stretched_starless.tif')
 
     # ══════════════════════════════════════════════════════════════
     # 星点独立处理 (Star Processing, 并行)
@@ -2302,9 +2432,21 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
             current,
             style=style,
             target_type=effective_target_type,
+            target_name=target_name,
             color_mode=effective_color_mode,
             strength=effective_style_strength,
         )
+        current, style_background_floor_report = protect_style_background_floor(
+            current,
+            target_type=effective_target_type,
+        )
+        if style_background_floor_report.get("applied"):
+            print(
+                "  🛡️ style 背景地板保护: "
+                f"median {style_background_floor_report['median_before']:.6f}"
+                f"→{style_background_floor_report['median_after']:.6f}, "
+                f"target={style_background_floor_report['target_median']:.3f}"
+            )
         current_nl = current
         save_current('09a_style.tif')
         print(f"  ✓ style={selected_style} strength={effective_style_strength}")
@@ -2522,6 +2664,7 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
             star_report if 'star_report' in locals() else None
         ),
         "reference_grade": reference_grade_report,
+        "style_background_floor": style_background_floor_report,
         "quality_remediation": remediation_report,
         "quality_policy": quality_policy,
         "quality_gates": quality_gates,
@@ -2568,6 +2711,7 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
                     star_report if 'star_report' in locals() else None
                 ),
                 'reference_grade': reference_grade_report,
+                'style_background_floor': style_background_floor_report,
                 'quality_gates': quality_gates,
                 'warnings': warnings,
                 'effective_config': result['effective_config'],

@@ -86,6 +86,15 @@ class StarunProcessingEntrypointTests(unittest.TestCase):
 
             def fake_pipeline(**kwargs):
                 self.assertIsNotNone(kwargs.get("analysis_report"))
+                self.assertEqual(kwargs.get("target_type"), "emission_nebula")
+                self.assertEqual(kwargs.get("color_mode"), "emission")
+                self.assertIn("star_remove", kwargs.get("steps"))
+                self.assertNotIn("dbe", kwargs.get("steps"))
+                self.assertEqual(kwargs.get("override_params", {}).get("dbe_method"), "skip")
+                self.assertLessEqual(
+                    kwargs.get("override_params", {}).get("star_combine_strength"),
+                    0.56,
+                )
                 output_path = Path(kwargs["output_path"])
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 Image.new("RGB", (20, 14), color=(32, 36, 40)).save(output_path)
@@ -113,6 +122,21 @@ class StarunProcessingEntrypointTests(unittest.TestCase):
             with (
                 patch.object(starun_processing.recognize, "create_safe_preview_bundle", side_effect=fake_preview),
                 patch.object(starun_processing.analyze, "analyze_image", return_value={
+                    "target_type_hint": {
+                        "target_type": "emission_nebula",
+                        "confidence": 0.88,
+                    },
+                    "gradient": {
+                        "gradient_severity": "none",
+                        "dbe_decision": "review_chromatic",
+                        "dbe_method_recommendation": "skip",
+                    },
+                    "brightness": {"very_dark_eligible": True},
+                    "color": {
+                        "recommended_mode": "emission",
+                        "color_health_effective": "emission_dominant",
+                    },
+                    "starfield": {"star_density": "dense"},
                     "recommendations": {
                         "stretch": {"factor": 72.0, "method": "very_dark"},
                     },
@@ -144,9 +168,30 @@ class StarunProcessingEntrypointTests(unittest.TestCase):
                     "style-prompt.json",
                     "result.jpg",
                     "pipeline-result.json",
+                    "astro-evidence.json",
                     "analysis-report.json",
                 },
             )
+            self.assertTrue(
+                output_dir.joinpath("reference_workflow", "previews", "safe_full.png").exists()
+            )
+
+    def test_target_context_prefers_analysis_emission_hint(self):
+        context = starun_processing._infer_target_context(
+            request={},
+            inspection={},
+            analysis_report={
+                "target_type_hint": {
+                    "target_type": "emission_nebula",
+                    "confidence": 0.8,
+                },
+                "color": {"color_health_effective": "emission_dominant"},
+            },
+            astro_evidence={"coordinates": {"target": {"name": "unknown"}}},
+        )
+
+        self.assertEqual(context["target_type"], "emission_nebula")
+        self.assertEqual(context["color_mode"], "emission")
 
 
 if __name__ == "__main__":

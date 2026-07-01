@@ -20,6 +20,7 @@ import type {
   UploadResponse,
 } from "../../lib/api/types";
 import { TaskHistoryRepository } from "../../lib/history/repository";
+import type { TaskHistorySummary } from "../../lib/history/types";
 import { zhCN } from "../../lib/i18n/zh-CN";
 
 const historyRepository = new TaskHistoryRepository();
@@ -80,12 +81,20 @@ function queryValue(name: string): string | null {
   return new URLSearchParams(window.location.search).get(name);
 }
 
+function isReusableAnalysis(entry: TaskHistorySummary, now = Date.now()): boolean {
+  if (entry.type !== "analysis") return false;
+  if (!entry.resultAvailable) return false;
+  if (entry.lastStatus !== "completed" && entry.lastStatus !== "review_required") return false;
+  return entry.expiresAt === null || new Date(entry.expiresAt).getTime() > now;
+}
+
 export default function ProcessingPage() {
   const copy = zhCN.task11.processing;
   const [style, setStyle] = useState<ProcessingStyle>("balanced");
   const [upload, setUpload] = useState<UploadResponse | null>(null);
   const [fileName, setFileName] = useState<string>(copy.unnamedFile);
   const [sourceTaskId, setSourceTaskId] = useState<string | null>(null);
+  const [latestAnalysis, setLatestAnalysis] = useState<TaskHistorySummary | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [initialStatus, setInitialStatus] = useState<TaskStatus | null>(null);
@@ -133,7 +142,9 @@ export default function ProcessingPage() {
       await Promise.resolve();
       if (source && active) {
         setSourceTaskId(source);
-        setFileName(copy.analysisSourceFile);
+        const sourceEntry = await historyRepository.get(source);
+        if (!active) return;
+        setFileName(sourceEntry?.fileName ?? copy.analysisSourceFile);
       }
       if (!resume) return;
       const entry = await historyRepository.get(resume);
@@ -148,6 +159,22 @@ export default function ProcessingPage() {
       active = false;
     };
   }, [copy.analysisSourceFile]);
+
+  useEffect(() => {
+    let active = true;
+    void historyRepository
+      .list()
+      .then((entries) => {
+        if (!active) return;
+        setLatestAnalysis(entries.find((entry) => isReusableAnalysis(entry)) ?? null);
+      })
+      .catch(() => {
+        if (active) setLatestAnalysis(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const summary = objectValue(task?.result.summary);
   const resultAvailable =
@@ -245,6 +272,21 @@ export default function ProcessingPage() {
     setSourceTaskId(null);
     setActionError(null);
   }, []);
+
+  const useLatestAnalysis = useCallback(() => {
+    if (!latestAnalysis) return;
+    setSourceTaskId(latestAnalysis.taskId);
+    setFileName(latestAnalysis.fileName);
+    setUpload(null);
+    setActionError(null);
+    setLocalPersistenceError(null);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("task");
+      url.searchParams.set("source_task_id", latestAnalysis.taskId);
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [latestAnalysis]);
 
   const createTask = useCallback(async () => {
     if (!upload && !sourceTaskId) return;
@@ -386,63 +428,136 @@ export default function ProcessingPage() {
           <span className="section-kicker">{copy.kicker}</span>
           <h1>{copy.title}</h1>
           <p>{copy.description}</p>
+          <p className="workflow-start-note">{copy.firstRunNote}</p>
         </header>
 
         {!taskId ? (
-          <>
-            {sourceTaskId ? (
-              <section className="source-task-card">
-                <div className="border-mask" aria-hidden="true" />
-                <span className="section-kicker">{copy.sourceKicker}</span>
-                <h2>{sourceTaskId}</h2>
-                <p>{copy.sourceDescription}</p>
-              </section>
-            ) : (
-              <UploadZone onUploaded={handleUploaded} />
-            )}
-
-            <fieldset className="style-selector">
-              <legend>{copy.styleLegend}</legend>
-              <div role="radiogroup" aria-label={copy.styleAriaLabel}>
-                {STYLE_VALUES.map((value) => (
-                  <label key={value}>
-                    <input
-                      checked={style === value}
-                      name="processing-style"
-                      onChange={() => setStyle(value)}
-                      type="radio"
-                      value={value}
-                    />
-                    <span>
-                      <strong>
-                        {copy.styles[value].label}
-                      </strong>
-                      <small>{copy.styles[value].description}</small>
-                      
-                      <span className="style-preview-card" aria-hidden="true">
-                        <span className={`style-preview-card__visual style-preview-card__visual--${value}`} />
-                        <span className="style-preview-card__desc">
-                          {copy.styles[value].previewDesc}
-                        </span>
-                      </span>
-                    </span>
-                  </label>
-                ))}
+          <section className="workflow-setup" aria-label="自动出图设置">
+            <div className={`setup-step ${upload || sourceTaskId ? "is-complete" : ""}`}>
+              <span className="setup-step__marker" aria-hidden="true">1</span>
+              <div className="setup-step__body">
+                <div className="setup-step__intro">
+                  <strong>{copy.setupSourceTitle}</strong>
+                  <span>{copy.setupSourceHint}</span>
+                </div>
+                {sourceTaskId ? (
+                  <section className="source-task-card">
+                    <div className="border-mask" aria-hidden="true" />
+                    <span className="section-kicker">{copy.sourceKicker}</span>
+                    <h2>{fileName}</h2>
+                    <p>{copy.sourceDescription}</p>
+                  </section>
+                ) : (
+                  <>
+                    {latestAnalysis ? (
+                      <section className="source-task-card">
+                        <div className="border-mask" aria-hidden="true" />
+                        <span className="section-kicker">{copy.lastAnalysisKicker}</span>
+                        <h2>{copy.lastAnalysisTitle}</h2>
+                        <p>{copy.lastAnalysisDescription}</p>
+                        <div className="source-task-actions">
+                          <span>{latestAnalysis.fileName}</span>
+                          <button
+                            className="text-button"
+                            onClick={useLatestAnalysis}
+                            type="button"
+                          >
+                            {copy.lastAnalysisAction}
+                          </button>
+                        </div>
+                      </section>
+                    ) : null}
+                    <UploadZone onUploaded={handleUploaded} />
+                  </>
+                )}
               </div>
-            </fieldset>
-
-            <div className="workflow-action-row">
-              <button
-                className="button button--primary"
-                disabled={(!upload && !sourceTaskId) || creating || !isOnline}
-                onClick={() => void createTask()}
-                type="button"
-              >
-                {!isOnline ? "网络已断开" : (creating ? copy.creating : copy.create)}
-              </button>
-              <span>{copy.styleNotice}</span>
             </div>
-          </>
+
+            <div className="setup-step is-complete">
+              <span className="setup-step__marker" aria-hidden="true">2</span>
+              <div className="setup-step__body">
+                <div className="setup-step__intro">
+                  <strong>{copy.setupStyleTitle}</strong>
+                  <span>{copy.setupStyleHint}</span>
+                </div>
+                <fieldset className="style-selector">
+                  <legend>{copy.styleLegend}</legend>
+                  <div className="style-selector__options" role="radiogroup" aria-label={copy.styleAriaLabel}>
+                    {STYLE_VALUES.map((value) => (
+                      <label key={value}>
+                        <input
+                          checked={style === value}
+                          name="processing-style"
+                          onChange={() => setStyle(value)}
+                          type="radio"
+                          value={value}
+                        />
+                        <span>
+                          <strong>
+                            {copy.styles[value].label}
+                          </strong>
+                          <small>{copy.styles[value].description}</small>
+
+                          <span className="style-preview-card">
+                            <span className={`style-preview-card__visual style-preview-card__visual--${value}`}>
+                              <span className="style-preview-card__before" />
+                              <span className="style-preview-card__after" />
+                            </span>
+                            <span className="style-preview-card__desc">
+                              <b>{copy.styles[value].previewLabel}</b>
+                              {copy.styles[value].previewDesc}
+                            </span>
+                          </span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="style-mobile-summary" aria-live="polite">
+                    <span className={`style-preview-card__visual style-preview-card__visual--${style}`}>
+                      <span className="style-preview-card__before" />
+                      <span className="style-preview-card__after" />
+                    </span>
+                    <span className="style-preview-card__desc">
+                      <b>{selectedStyle.previewLabel}</b>
+                      {selectedStyle.previewDesc}
+                    </span>
+                  </div>
+                </fieldset>
+              </div>
+            </div>
+
+            <div className={`setup-step setup-step--action ${upload || sourceTaskId ? "is-complete" : ""}`}>
+              <span className="setup-step__marker" aria-hidden="true">3</span>
+              <div className="setup-step__body">
+                <div className="setup-step__intro">
+                  <strong>{copy.setupCreateTitle}</strong>
+                  <span>{copy.setupCreateHint}</span>
+                </div>
+                <div className="workflow-action-row">
+                  <button
+                    className="button button--primary"
+                    disabled={(!upload && !sourceTaskId) || creating || !isOnline}
+                    onClick={() => void createTask()}
+                    type="button"
+                  >
+                    {!isOnline ? "等待网络恢复" : (creating ? copy.creating : copy.create)}
+                  </button>
+                  <div className="workflow-action-help" aria-live="polite">
+                    <strong>
+                      {!isOnline
+                        ? copy.offlineRequired
+                        : sourceTaskId
+                          ? copy.sourceReady
+                          : upload
+                            ? copy.readyToCreate
+                            : copy.uploadRequired}
+                    </strong>
+                    <span>{copy.styleNotice}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
         ) : null}
 
         <TaskStatusPanel
@@ -456,11 +571,11 @@ export default function ProcessingPage() {
           <div className="recovery-panel">
             <div className="border-mask" aria-hidden="true" />
             <div className="recovery-header">
-              <span className="recovery-badge">FAULT_RECOVERY_ENGAGED</span>
-              <h3>图像处理任务未成功</h3>
+              <span className="recovery-badge">可以重试</span>
+              <h3>这次出图没有完成</h3>
             </div>
             <p className="recovery-desc">
-              AI 自动出图任务执行未成功。此任务对应的处理算力节点可能暂时离线或生成超时。您可以重新上传文件、携带原分析结果，或者点击重试当前处理任务。
+              还没有生成可用的增强成片。已选择的文件或分析源仍会保留；先重试当前任务，如果仍失败，再重新选择来源。
             </p>
             <div className="recovery-actions">
               <button
@@ -468,7 +583,7 @@ export default function ProcessingPage() {
                 onClick={resetToUpload}
                 type="button"
               >
-                重新上传文件
+                重新选择来源
               </button>
               <button
                 className="button button--primary"
@@ -476,7 +591,7 @@ export default function ProcessingPage() {
                 onClick={() => void retryCurrentTask()}
                 type="button"
               >
-                {retrying ? "正在重新排队..." : "重试出图任务"}
+                {retrying ? "正在重新排队…" : "重试出图"}
               </button>
             </div>
           </div>

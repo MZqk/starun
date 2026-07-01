@@ -166,6 +166,153 @@ def _write_analysis_report(source_path: Path, output_dir: Path) -> dict[str, Any
     return report
 
 
+def _first_text(*values: Any) -> str | None:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text and text.lower() not in {"unknown", "none", "null"}:
+            return text
+    return None
+
+
+def _infer_target_context(
+    request: dict[str, Any],
+    inspection: dict[str, Any],
+    analysis_report: dict[str, Any] | None,
+    astro_evidence: dict[str, Any] | None,
+) -> dict[str, str | None]:
+    """Infer target metadata for the compact Starun entrypoint.
+
+    The standalone agent can visually review previews, but the Starun direct
+    path must preserve the best local evidence so pipeline safety rules run.
+    """
+    analysis_report = analysis_report or {}
+    astro_evidence = astro_evidence or {}
+
+    request_target = request.get("target") if isinstance(request.get("target"), dict) else {}
+    inspection_target = (
+        inspection.get("target") if isinstance(inspection.get("target"), dict) else {}
+    )
+    evidence_target = (
+        (astro_evidence.get("coordinates") or {}).get("target")
+        if isinstance(astro_evidence.get("coordinates"), dict)
+        else {}
+    ) or {}
+    capture = analysis_report.get("capture_metadata") or {}
+
+    target_name = _first_text(
+        request.get("target_name"),
+        request.get("object"),
+        request_target.get("name"),
+        inspection.get("target_name"),
+        inspection.get("object"),
+        inspection_target.get("name"),
+        evidence_target.get("name"),
+        capture.get("object"),
+    )
+
+    target_type = _first_text(
+        request.get("target_type"),
+        request_target.get("type"),
+        inspection.get("target_type"),
+        inspection_target.get("type"),
+    )
+    if not target_type:
+        hint = analysis_report.get("target_type_hint") or {}
+        confidence = float(hint.get("confidence") or 0.0)
+        hinted_type = _first_text(hint.get("target_type"))
+        if hinted_type and confidence >= 0.35:
+            target_type = hinted_type
+
+    if target_name and not target_type:
+        name_upper = target_name.upper().replace(" ", "")
+        if any(
+            marker in name_upper
+            for marker in ("NGC6888", "CRESCENTNEBULA", "NGC7000", "NORTHAMERICANEBULA")
+        ):
+            target_type = "emission_nebula"
+
+    color = analysis_report.get("color") or {}
+    color_mode = _first_text(
+        request.get("color_mode"),
+        inspection.get("color_mode"),
+        color.get("recommended_mode"),
+    )
+    if (
+        target_type == "emission_nebula"
+        or color.get("color_health_effective") == "emission_dominant"
+        or color.get("signal_interpretation") == "expected_emission_dominance"
+    ):
+        color_mode = "emission"
+
+    return {
+        "target_type": target_type,
+        "target_name": target_name,
+        "color_mode": color_mode or "auto",
+    }
+
+
+def _starun_steps_for_context(target_type: str | None) -> str | None:
+    if target_type != "emission_nebula":
+        return None
+    return ",".join(
+        [
+            "color",
+            "pre_denoise",
+            "star_remove",
+            "stretch",
+            "star_process",
+            "final_color",
+            "local_enhance",
+            "style",
+            "star_combine",
+            "final_denoise",
+        ]
+    )
+
+
+def _starun_overrides_for_context(
+    style: str,
+    target_type: str | None,
+    analysis_report: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if target_type != "emission_nebula":
+        return None
+
+    report = analysis_report or {}
+    gradient = report.get("gradient") or {}
+    starfield = report.get("starfield") or {}
+    overrides: dict[str, Any] = {
+        "star_reduction": 0.25,
+        "star_combine_strength": 0.50 if style == "realistic" else 0.58,
+        "saturation": 0.78 if style == "realistic" else 0.92,
+        "final_denoise_lum": 0.0025,
+        "final_denoise_chroma": 0.005,
+    }
+
+    dbe_decision = gradient.get("dbe_decision")
+    dbe_recommendation = gradient.get("dbe_method_recommendation")
+    if (
+        dbe_decision in {"skip", "review_chromatic"}
+        or dbe_recommendation == "skip"
+        or gradient.get("gradient_severity") == "none"
+    ):
+        overrides["dbe_method"] = "skip"
+
+    if report.get("brightness", {}).get("very_dark_eligible"):
+        overrides.setdefault("stretch_gamma", 0.46)
+        overrides.setdefault("target_bg", 0.12 if style == "balanced" else 0.10)
+
+    if starfield.get("star_density") in {"dense", "very_dense"}:
+        overrides["star_combine_strength"] = min(
+            overrides["star_combine_strength"],
+            0.48 if style == "realistic" else 0.56,
+        )
+
+    return overrides
+
+
 def _style_prompt(
     inspection: dict[str, Any],
     pipeline_result: dict[str, Any],
@@ -274,15 +421,38 @@ def run(
         }
         _write_json(astro_evidence_path, astro_evidence)
 
+    target_context = _infer_target_context(
+        request,
+        inspection,
+        analysis_report,
+        astro_evidence,
+    )
+    target_type = target_context["target_type"]
+    target_name = target_context["target_name"]
+    color_mode = target_context["color_mode"] or "auto"
+    steps = _starun_steps_for_context(target_type)
+    override_params = _starun_overrides_for_context(
+        style,
+        target_type,
+        analysis_report,
+    )
+    local_strength = 0.10 if style == "realistic" else 0.16
+
     pipeline_result = pipeline.run_pipeline(
         input_path=str(source_path),
         output_path=str(result_image_path),
+        steps=steps,
         preset="adaptive",
         keep_all=True,
         work_dir=str(work_dir),
         use_starnet=True,
         style="natural" if style == "realistic" else "auto",
         style_strength=0.8 if style == "realistic" else 1.0,
+        target_type=target_type,
+        target_name=target_name,
+        color_mode=color_mode,
+        override_params=override_params,
+        local_strength=local_strength,
         analysis_report=analysis_report,
         astro_evidence=str(astro_evidence_path),
         result_json=str(pipeline_result_path),

@@ -239,9 +239,14 @@ export default function HistoryPage() {
             <div className="border-mask" aria-hidden="true" />
             <h2>{copy.emptyTitle}</h2>
             <p>{copy.emptyDescription}</p>
-            <Link className="button button--primary" href="/analysis">
-              {copy.upload}
-            </Link>
+            <div className="empty-state__actions">
+              <Link className="button button--primary" href="/analysis">
+                {copy.upload}
+              </Link>
+              <Link className="button button--secondary" href="/processing">
+                {copy.processing}
+              </Link>
+            </div>
           </section>
         ) : null}
 

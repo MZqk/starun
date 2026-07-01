@@ -26,13 +26,12 @@ allowed-tools:
 当用户提到以下任意场景时自动调用本 Skill：
 
 **关键词**：深空后期、天文后期、处理深空照片、处理 FITS、处理 XISF、
-拉伸星云、去光害、缩星、降噪星云、星云美化、深空图像处理、
-NGC6888 后期、M42 后期、IC 2177 后期、星系后期处理。
+拉伸星云、去光害、缩星、降噪星云、星云美化、深空图像处理、星系后期处理。
 
 **文件特征**：用户提及 `.fits` / `.xisf` / `.fit` / `.fts` 文件和深空天体名称，
 或直接要求对深空天体图像做美化、拉伸、降噪或校色处理。
 
-**不适用场景**：普通风景照、人像、日常摄影后期。这些应使用通用图像处理工具。
+**不适用场景**：普通风景照、人像、日常摄影后期。这些应拒绝处理，并告知请使用通用图像处理工具。
 
 AI 的职责：
 - 看图或根据用户描述判断天体类型、问题和审美方向。
@@ -84,8 +83,7 @@ AI 的职责：
 
 这些 profile 只做色调曲线、背景压暗、背景去饱和、局部对比、轻微色彩分离和高光 rolloff，不生成新结构。
 
-默认输出两版更稳妥：
-- `*_natural.jpg`
+默认只输出加工图片：
 - `*_enhanced.jpg`
 
 ## 必须优先做的三轮处理流程与参数闭环
@@ -153,7 +151,6 @@ final_color + star_reduce + local_enhance + style)
 
 **输出文件**：
 - 主图：`NGC6888_enhanced.jpg` (2048×1365, 982 KB)
-- 自然基准：`NGC6888_natural.jpg` (2048×1365, 856 KB)
 
 **质量审查**：
 - median: 0.087 ✅
@@ -178,7 +175,7 @@ Skill。该入口负责读取 Starun sandbox 中的 `input/request.json`、
 关于以下内容的详细信息，请参阅参考文档 [system_integration.md](references/system_integration.md)：
 - **支持格式**：FITS、XISF、TIFF、PNG/JPG 图像的输入与输出说明。
 - **何时读取 references**：其他 15 个具体业务与物理先验参考文档列表。
-- **环境要求**：环境只读 Python Runtime、包依赖与路径配置规则。
+- **环境要求**：环境只读 Python Runtime、包依赖、starnet2命令与路径配置规则。
 - **Starun 网站处理风格**：`realistic`、`balanced`、`artistic` 处理模式细节。
 
 ## 已知问题

@@ -20,10 +20,10 @@ export default function StarfieldBackground() {
           mouseRepulsion={true}
           repulsionStrength={2.2}
         />
+        <div className="aura aura-1" aria-hidden="true" />
+        <div className="aura aura-2" aria-hidden="true" />
+        <div className="aura aura-3" aria-hidden="true" />
       </div>
-      <div className="aura aura-1" aria-hidden="true" />
-      <div className="aura aura-2" aria-hidden="true" />
-      <div className="aura aura-3" aria-hidden="true" />
     </>
   );
 }

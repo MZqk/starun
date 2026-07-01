@@ -48,6 +48,19 @@ STYLE_PROFILES = {
         "color_separation": 0.12,
         "warmth": 0.02,
     },
+    "emission_warm_dust": {
+        "description": "宽场发射星云的暖灰棕背景、暗尘埃和自然星色",
+        "black_floor": 0.012,
+        "gamma": 0.92,
+        "contrast": 0.11,
+        "highlight_rolloff": 0.30,
+        "saturation": 0.72,
+        "background_desat": 0.42,
+        "micro_contrast": 0.14,
+        "color_separation": 0.02,
+        "warmth": 0.025,
+        "channel_gains": [1.0, 1.18, 0.90],
+    },
     "soft_dust": {
         "description": "反射星云和暗尘埃的柔和胶片感",
         "black_floor": 0.012,
@@ -125,6 +138,7 @@ STYLE_PROFILES = {
 
 def choose_style_profile(
     target_type=None,
+    target_name=None,
     color_mode="standard",
     user_style="auto",
     diagnostic_report=None,
@@ -135,6 +149,7 @@ def choose_style_profile(
 
     参数:
         target_type: 天体类型字符串
+        target_name: 目标名称字符串
         color_mode: 色彩模式 (standard/emission/narrowband)
         user_style: 用户强制指定的风格 (auto 表示自动选择)
         diagnostic_report: analyze.py 输出的诊断报告 dict，用于数据驱动微调
@@ -156,7 +171,11 @@ def choose_style_profile(
         return user_style, None, reasoning
 
     # ── 2. 基础目标类型映射 (扩展覆盖) ──
-    base_profile = _select_base_profile(target_type, color_mode, reasoning)
+    base_profile = _select_base_profile(
+        target_type, color_mode, reasoning,
+        target_name=target_name,
+        diagnostic_report=diagnostic_report,
+    )
 
     # ── 3. 诊断驱动自适应微调 ──
     adapted = None
@@ -174,11 +193,20 @@ def choose_style_profile(
     return base_profile, adapted, reasoning
 
 
-def _select_base_profile(target_type, color_mode, reasoning):
+def _select_base_profile(target_type, color_mode, reasoning,
+                         target_name=None, diagnostic_report=None):
     """基于目标类型和色彩模式的基础映射 (扩展版)。"""
 
     # 规范化 target_type
     tt = (target_type or "").lower().replace(" ", "_")
+    target = (target_name or "").upper().replace(" ", "")
+
+    if _is_warm_dust_emission_context(tt, target, color_mode, diagnostic_report):
+        reasoning.append(
+            "宽场发射星云/NGC6888 场景 → emission_warm_dust "
+            "(暖灰棕背景、低饱和、保留暗尘埃)"
+        )
+        return "emission_warm_dust"
 
     # 色彩模式优先 (emission / narrowband 强烈暗示发射星云)
     if color_mode in ("emission", "narrowband", "hoo", "sho"):
@@ -231,6 +259,36 @@ def _select_base_profile(target_type, color_mode, reasoning):
     # 默认兜底
     reasoning.append(f"目标类型={tt} 未匹配已知类型 → deep_clean (通用现代风格)")
     return "deep_clean"
+
+
+def _is_warm_dust_emission_context(target_type, target_name, color_mode,
+                                   diagnostic_report):
+    """Detect wide-field RGB/LP emission data that should avoid dramatic red grading."""
+    if "NGC6888" in target_name or "CRESCENT" in target_name:
+        return True
+
+    if color_mode not in ("emission", "narrowband", "hoo", "sho"):
+        return False
+    if target_type not in ("emission_nebula", "hii_region", "diffuse_nebula"):
+        return False
+    if not diagnostic_report:
+        return False
+
+    gradient = diagnostic_report.get("gradient", {}) or {}
+    starfield = diagnostic_report.get("starfield", {}) or {}
+    recommendations = diagnostic_report.get("recommendations", {}) or {}
+    overall = recommendations.get("overall", {}) or {}
+    color_rpt = diagnostic_report.get("color", {}) or {}
+
+    no_gray_gradient = gradient.get("gradient_severity") in (None, "none", "low")
+    skip_dbe = gradient.get("dbe_method_recommendation") == "skip"
+    dense_field = starfield.get("star_density") in ("dense", "very_dense")
+    emission_rgb = overall.get("strategy") == "emission_rgb"
+    emission_dominant = color_rpt.get("color_health_effective") == "emission_dominant"
+
+    return (no_gray_gradient or skip_dbe) and dense_field and (
+        emission_rgb or emission_dominant
+    )
 
 
 def _adapt_profile_by_diagnostics(profile_name, diagnostic_report):
@@ -442,6 +500,7 @@ def apply_professional_style(
     image,
     style="auto",
     target_type=None,
+    target_name=None,
     color_mode="standard",
     strength=1.0,
     diagnostic_report=None,
@@ -459,6 +518,7 @@ def apply_professional_style(
     """
     selected, adapted, reasoning = choose_style_profile(
         target_type=target_type,
+        target_name=target_name,
         color_mode=color_mode,
         user_style=style,
         diagnostic_report=diagnostic_report,
@@ -509,6 +569,11 @@ def apply_professional_style(
         gains = np.array([1.0 + warmth, 1.0, 1.0 - warmth], dtype=np.float32)
         graded = np.clip(graded * gains, 0, 1)
 
+    if "channel_gains" in profile:
+        gains = np.asarray(profile["channel_gains"], dtype=np.float32)
+        if gains.shape == (3,):
+            graded = np.clip(graded * (1.0 + (gains - 1.0) * strength), 0, 1)
+
     if alpha is not None:
         graded = np.dstack([graded, alpha])
     return np.clip(graded, 0, 1).astype(np.float32), selected, reasoning
@@ -522,6 +587,7 @@ def main():
     parser.add_argument("--style", default="auto",
                         choices=["auto", *STYLE_PROFILES.keys()])
     parser.add_argument("--target-type", default=None)
+    parser.add_argument("--target-name", default=None)
     parser.add_argument("--color-mode", default="standard")
     parser.add_argument("--strength", type=float, default=1.0)
     parser.add_argument("--diagnostic-report", default=None,
@@ -546,6 +612,7 @@ def main():
         img,
         style=args.style,
         target_type=args.target_type,
+        target_name=args.target_name,
         color_mode=args.color_mode,
         strength=args.strength,
         diagnostic_report=diagnostic_report,
