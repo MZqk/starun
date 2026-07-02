@@ -8,9 +8,9 @@ from app.artifacts.contracts import JsonValue
 from app.artifacts.store import ArtifactStore
 from app.config import Settings
 from app.db.models import ProcessingStyle
-from app.processing.art_direction import KimiArtDirectionClient
+from app.processing.art_direction import StarunAgentModelArtDirectionClient
 from app.processing.image_provider import TokenHubImageProvider
-from app.processing.models import ProcessingState
+from app.processing.models import ProcessingState, direct_artistic_direction
 
 
 class NoArguments(BaseModel):
@@ -62,7 +62,7 @@ class PlanArtDirectionTool:
         self,
         store: ArtifactStore,
         state: ProcessingState,
-        client: KimiArtDirectionClient,
+        client: StarunAgentModelArtDirectionClient,
     ) -> None:
         self._store = store
         self._state = state
@@ -113,12 +113,23 @@ class GenerateArtworkTool:
         self._provider = provider
 
     async def execute(self, context: TaskContext, arguments: BaseModel) -> ToolResult:
-        del arguments, context
-        if self._state.reference_png is None or self._state.direction is None:
+        del arguments
+        if self._state.reference_png is None:
+            raise ValueError("reference preview is required before image generation")
+        direction = self._state.direction
+        prompt_artifact = None
+        if direction is None and context.style is ProcessingStyle.ARTISTIC:
+            direction = direct_artistic_direction()
+            prompt_artifact = self._store.write_json(
+                "generation-prompt.json",
+                direction.model_dump(mode="json"),
+            )
+            self._state.direction = direction
+        if direction is None:
             raise ValueError("art direction is required before image generation")
         generated = await self._provider.generate(
             reference_png=self._state.reference_png,
-            direction=self._state.direction,
+            direction=direction,
         )
         name = "generated-artwork.jpg" if generated.media_type == "image/jpeg" else "generated-artwork.png"
         image_artifact = self._store.write_bytes(name, generated.data)
@@ -130,10 +141,14 @@ class GenerateArtworkTool:
             "provider_request_id": generated.provider_request_id,
             "revised_prompt": generated.revised_prompt,
             "source_url_host": generated.source_url_host,
+            "provider_request_controls": generated.provider_request_controls,
         }
         record_artifact = self._store.write_json("generation-record.json", record)
         self._state.generated = generated
         self._state.generated_name = image_artifact.name
+        artifacts = [image_artifact, record_artifact]
+        if prompt_artifact is not None:
+            artifacts.insert(0, prompt_artifact)
         return ToolResult(
             observations={
                 "artifact": image_artifact.name,
@@ -142,6 +157,6 @@ class GenerateArtworkTool:
                 "media_type": generated.media_type,
                 "provider_request_id": generated.provider_request_id,
             },
-            artifacts=[image_artifact, record_artifact],
+            artifacts=artifacts,
             metrics={"ai_art_quality": 0.78},
         )

@@ -1,5 +1,7 @@
 import json
 import logging
+from io import BytesIO
+from types import SimpleNamespace
 
 from app.agent_sdk.bridge import AgentSdkBridge
 from app.agent_sdk import runtime as runtime_module
@@ -13,8 +15,10 @@ from app.artifacts.store import ArtifactStore
 from app.config import Settings
 from app.db.models import ProcessingStyle
 from app.fits.schemas import BasicStatistics, FitsInspection, HduSummary
+from app.processing.models import GeneratedArtwork
 import pytest
 from agents.sandbox.types import ExecResult
+from PIL import Image
 
 
 def _inspection() -> FitsInspection:
@@ -91,6 +95,12 @@ def _analysis_result_bytes() -> bytes:
             ensure_ascii=False,
         ).encode("utf-8")
     )
+
+
+def _png_bytes(color: tuple[int, int, int] = (8, 16, 32)) -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (4, 4), color).save(output, format="PNG")
+    return output.getvalue()
 
 
 def test_agent_max_turns_caps_env_override_above_hard_limit() -> None:
@@ -230,6 +240,92 @@ def test_direct_analysis_runtime_command_targets_starun_entrypoint(tmp_path) -> 
     assert "scripts/run_starun_analysis.py" in command
     assert "../../input/source.xisf" in command
     assert "Runner.run" not in command
+
+
+@pytest.mark.asyncio
+async def test_artistic_processing_calls_image_provider_without_art_direction_planning(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    source = tmp_path / "source.fits"
+    source.write_bytes(b"fits")
+    settings = Settings(_env_file=None, image_ai_api_key="image-key")
+    spec = AgentSdkBridge(settings).build_processing_spec(
+        task_id="artistic-direct",
+        source_path=source,
+        inspection=_inspection(),
+        style=ProcessingStyle.ARTISTIC,
+    )
+    preview = _png_bytes()
+    generated = _png_bytes(color=(24, 32, 48))
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "app.agent_sdk.bridge.render_image_preview",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            data=preview,
+            width=16,
+            height=16,
+            lower_percentile=0.0,
+            upper_percentile=1.0,
+        ),
+    )
+
+    class FakeImageProvider:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def generate(self, *, reference_png, direction):
+            captured["reference_png"] = reference_png
+            captured["direction"] = direction
+            return GeneratedArtwork(
+                data=generated,
+                media_type="image/png",
+                width=1024,
+                height=1024,
+                provider_width=1024,
+                provider_height=1024,
+                normalized_to_requested_size=False,
+                provider_request_id="image-req",
+                revised_prompt="provider revised",
+                provider_request_controls={"reference_strength": 0.98},
+            )
+
+    monkeypatch.setattr("app.agent_sdk.bridge.TokenHubImageProvider", FakeImageProvider)
+    events: list[tuple[str, dict[str, object]]] = []
+
+    async def emit(event_type: str, payload: dict[str, object]) -> None:
+        events.append((event_type, payload))
+
+    task_dir = tmp_path / "task"
+    task_dir.mkdir()
+    with ArtifactStore(task_dir) as store:
+        run = await AgentSdkBridge(settings).run(
+            spec,
+            artifact_store=store,
+            cancellation_check=lambda: False,
+            event_sink=emit,
+        )
+
+    assert [payload["tool_name"] for event, payload in events if event == "tool_started"] == [
+        "tencent.hunyuan_image"
+    ]
+    assert not any(
+        payload.get("tool_name") == "starun_agent_model.art_direction"
+        for _, payload in events
+    )
+    assert (task_dir / "generation-prompt.json").exists()
+    assert not (task_dir / "art-direction.json").exists()
+    assert captured["reference_png"] == preview
+    assert run.pipeline_status == "success"
+    assert run.summary["art_direction_model"] is None
+    assert run.summary["art_direction_summary"]
+    assert [artifact.name for artifact in run.artifacts] == [
+        "processing-reference.png",
+        "generation-prompt.json",
+        "generated-artwork.png",
+        "generation-record.json",
+    ]
 
 
 def test_direct_skill_exec_result_logs_streams_as_lines(caplog, monkeypatch, tmp_path) -> None:

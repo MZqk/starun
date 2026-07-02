@@ -79,7 +79,7 @@ export const zhCN = {
       notApplicable: "不适用",
       hduLabel: (index: number | string) => `HDU ${index}`,
       taskPollingError: "暂时无法更新任务状态。请稍后再试。",
-      taskPollingTimeout: "任务状态长时间没有更新。请先重试任务；如果仍停住，再重新选择文件。",
+      taskPollingTimeout: "任务状态同步暂时变慢，出图仍会在服务端继续运行，页面会自动继续刷新。",
       historyPersistenceError: "本地历史没有保存成功。",
       storageWarning: (message: string) =>
         `任务会继续运行，但这次本地历史没有保存成功：${message}`,

@@ -101,6 +101,7 @@ output/
 outputs/
 
 # --- Deep Sky Processing Run Artifacts ---
-NGC6888_*
+NGC
+_*
 recognition.json
 recognition_workflow/

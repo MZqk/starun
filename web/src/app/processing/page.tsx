@@ -32,7 +32,7 @@ const FALLBACK_AGENT_STEPS: Record<ProcessingStyle, readonly string[]> = {
     "processing.plan_art_direction",
     "processing.generate_artwork",
   ],
-  artistic: ["kimi.art_direction", "tencent.hunyuan_image"],
+  artistic: ["starun_agent_model.art_direction", "tencent.hunyuan_image"],
 };
 
 function stringPayload(event: TaskEventResponse, key: string): string | null {
@@ -567,7 +567,7 @@ export default function ProcessingPage() {
           task={task}
         />
 
-        {((task && task.status === "failed") || (!task && initialStatus === "failed") || (error && error.name === "PollingTimeoutError")) && (
+        {((task && task.status === "failed") || (!task && initialStatus === "failed")) && (
           <div className="recovery-panel">
             <div className="border-mask" aria-hidden="true" />
             <div className="recovery-header">

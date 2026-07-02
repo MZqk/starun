@@ -6,7 +6,7 @@ from app.agent.runner import AgentRunner
 from app.artifacts.store import ArtifactStore
 from app.config import Settings
 from app.db.models import ProcessingStyle
-from app.processing.art_direction import KimiArtDirectionClient
+from app.processing.art_direction import StarunAgentModelArtDirectionClient
 from app.processing.image_provider import TokenHubImageProvider
 from app.processing.models import ARTWORK_DISCLAIMER, ProcessingState
 from app.processing.tools import GenerateArtworkTool, PlanArtDirectionTool, PrepareReferenceTool
@@ -18,7 +18,15 @@ class FixedProcessingModel:
         self._state = state
 
     async def plan(self, context: TaskContext) -> AgentPlan:
-        del context
+        if context.style is ProcessingStyle.ARTISTIC:
+            return AgentPlan(
+                version="1",
+                max_iterations=1,
+                steps=[
+                    _step("01", "processing.prepare_reference"),
+                    _step("02", "processing.generate_artwork"),
+                ],
+            )
         return AgentPlan(
             version="1",
             max_iterations=1,
@@ -45,7 +53,7 @@ class FixedProcessingModel:
             "mode": "generative_art_enhancement",
             "demo": False,
             "style": style.value,
-            "art_direction_model": self._settings.ai_model,
+            "art_direction_model": None if style is ProcessingStyle.ARTISTIC else self._settings.ai_model,
             "image_model": self._settings.image_ai_model,
             "target_summary": direction.target_summary if direction else "",
             "visible_subject": direction.visible_subject if direction else "",
@@ -55,6 +63,7 @@ class FixedProcessingModel:
             "result_width": generated.width if generated else 0,
             "result_height": generated.height if generated else 0,
             "provider_request_id": generated.provider_request_id if generated else None,
+            "provider_request_controls": generated.provider_request_controls if generated else {},
             "disclaimer": ARTWORK_DISCLAIMER,
         }
 
@@ -66,7 +75,7 @@ def build_processing_runner(
     event_sink: Callable[[AgentEvent], Awaitable[None] | None] | None = None,
 ) -> AgentRunner:
     state = ProcessingState()
-    direction_client = KimiArtDirectionClient(
+    direction_client = StarunAgentModelArtDirectionClient(
         base_url=settings.ai_base_url,
         api_key=settings.ai_api_key,
         model=settings.ai_model,

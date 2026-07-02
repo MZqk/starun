@@ -1,5 +1,6 @@
 import base64
 from io import BytesIO
+import logging
 from typing import Any
 
 import httpx
@@ -89,11 +90,20 @@ async def test_tokenhub_generation_disables_explicit_hunyuan_watermark(
     assert captured["url"] == "https://tokenhub.tencentmaas.com/v1/images/generations"
     assert captured["headers"]["Authorization"] == "Bearer secret"
     assert captured["json"]["LogoAdd"] == 0
-    assert captured["json"]["size"] == "1024x1024"
-    assert captured["json"]["model"] == "hy-image-v3.0"
-    assert captured["json"]["response_format"] == "b64_json"
-    assert "逐像素参考输入图" in captured["json"]["prompt"]
-    assert "禁止添加任何文字、签名、Logo、显式或隐式水印" in captured["json"]["prompt"]
+    assert captured["json"]["Resolution"] == "1024:1024"
+    assert captured["json"]["Model"] == "hy-image-v3.0"
+    assert captured["json"]["Revise"] == 0
+    assert isinstance(captured["json"]["Images"], list)
+    assert len(captured["json"]["Images"]) == 1
+    assert not captured["json"]["Images"][0].startswith("data:")
+    assert base64.b64decode(captured["json"]["Images"][0], validate=True) == _png_bytes()
+    assert "image" not in captured["json"]
+    assert "reference_image" not in captured["json"]
+    assert "不是重新创作、重绘或生成另一张同类天体图片" in captured["json"]["Prompt"]
+    assert "不得生成、删除、移动、替换、扩写或重塑任何星体" in captured["json"]["Prompt"]
+    assert "方向、视场和宽高比必须与输入图一致" in captured["json"]["Prompt"]
+    assert "微哈勃色倾向" in captured["json"]["Prompt"]
+    assert "禁止添加任何文字、标题、签名、Logo、隐式水印" in captured["json"]["Prompt"]
     assert artwork.provider_request_id == "req-1"
     assert artwork.revised_prompt == "revised"
     assert artwork.media_type == "image/png"
@@ -102,6 +112,67 @@ async def test_tokenhub_generation_disables_explicit_hunyuan_watermark(
     assert artwork.width == 1024
     assert artwork.height == 1024
     assert artwork.normalized_to_requested_size
+    assert artwork.provider_request_controls == {
+        "image_reference_transport": "ImagesBase64",
+        "reference_image_count": 1,
+        "revise": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_tokenhub_generation_logs_request_payload_summary(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generated = _png_bytes()
+
+    class CapturingAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> "CapturingAsyncClient":
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            return None
+
+        async def post(self, *args: Any, **kwargs: Any) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "b64_json": base64.b64encode(generated).decode("ascii"),
+                        }
+                    ]
+                },
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", CapturingAsyncClient)
+    provider = TokenHubImageProvider(
+        base_url="https://tokenhub.tencentmaas.com/v1",
+        api_key=SecretStr("secret"),
+        model="hy-image-v3.0",
+        timeout_seconds=30,
+        max_response_bytes=1024 * 1024,
+        allowed_download_hosts=frozenset({"tokenhub.tencentmaas.com"}),
+    )
+    reference = _png_bytes()
+
+    with caplog.at_level(logging.DEBUG, logger="app.processing.image_provider"):
+        await provider.generate(reference_png=reference, direction=_direction())
+
+    message = next(
+        record.getMessage()
+        for record in caplog.records
+        if "Image generation request payload:" in record.getMessage()
+    )
+    assert '"Prompt":' in message
+    assert "不是重新创作、重绘或生成另一张同类天体图片" in message
+    assert '"Images": [{"base64_chars":' in message
+    assert '"decoded_bytes":' in message
+    assert '"decoded_sha256":' in message
+    assert "iVBOR" not in message
 
 
 @pytest.mark.asyncio
@@ -155,6 +226,112 @@ async def test_tokenhub_normalizes_provider_output_to_reference_ratio(
     assert artwork.normalized_to_requested_size
     with Image.open(BytesIO(artwork.data)) as image:
         assert image.size == (720, 1280)
+
+
+@pytest.mark.asyncio
+async def test_tokenhub_accepts_tencent_cloud_result_image_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generated = _png_bytes()
+
+    class TencentCloudShapeAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> "TencentCloudShapeAsyncClient":
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            return None
+
+        async def post(self, *args: Any, **kwargs: Any) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "Response": {
+                        "RequestId": "tc-req",
+                        "JobStatusCode": "5",
+                        "ResultImage": [
+                            "https://aiart-1258344699.cos.ap-guangzhou.myqcloud.com/result.png"
+                        ],
+                        "RevisedPrompt": ["revised prompt"],
+                    }
+                },
+            )
+
+        async def get(self, *args: Any, **kwargs: Any) -> httpx.Response:
+            return httpx.Response(
+                200,
+                content=generated,
+                headers={"content-type": "image/png"},
+                request=httpx.Request(
+                    "GET",
+                    "https://aiart-1258344699.cos.ap-guangzhou.myqcloud.com/result.png",
+                ),
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", TencentCloudShapeAsyncClient)
+    provider = TokenHubImageProvider(
+        base_url="https://tokenhub.tencentmaas.com/v1",
+        api_key=SecretStr("secret"),
+        model="hy-image-v3.0",
+        timeout_seconds=30,
+        max_response_bytes=10 * 1024 * 1024,
+        allowed_download_hosts=frozenset({"tokenhub.tencentmaas.com"}),
+    )
+
+    artwork = await provider.generate(reference_png=_png_bytes(), direction=_direction())
+
+    assert artwork.provider_request_id == "tc-req"
+    assert artwork.revised_prompt == "revised prompt"
+    assert artwork.source_url_host == "aiart-1258344699.cos.ap-guangzhou.myqcloud.com"
+
+
+@pytest.mark.asyncio
+async def test_tokenhub_does_not_retry_without_reference_image_when_provider_rejects_images(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[dict[str, Any]] = []
+
+    class RejectingImagesAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> "RejectingImagesAsyncClient":
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            return None
+
+        async def post(
+            self,
+            *args: Any,
+            json: dict[str, Any],
+            **kwargs: Any,
+        ) -> httpx.Response:
+            del args, kwargs
+            requests.append(json)
+            return httpx.Response(
+                400,
+                json={"error": {"message": "unknown field Images"}},
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", RejectingImagesAsyncClient)
+    provider = TokenHubImageProvider(
+        base_url="https://tokenhub.tencentmaas.com/v1",
+        api_key=SecretStr("secret"),
+        model="hy-image-v3.0",
+        timeout_seconds=30,
+        max_response_bytes=10 * 1024 * 1024,
+        allowed_download_hosts=frozenset({"tokenhub.tencentmaas.com"}),
+    )
+
+    with pytest.raises(ImageProviderError) as caught:
+        await provider.generate(reference_png=_png_bytes(), direction=_direction())
+
+    assert caught.value.code == "image_provider_error"
+    assert len(requests) == 1
+    assert "Images" in requests[0]
 
 
 @pytest.mark.asyncio

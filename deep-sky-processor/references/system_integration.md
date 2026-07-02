@@ -42,5 +42,5 @@
   不得调用生图模型。
 - `balanced`：先结合诊断结果生成 `output/style-prompt.json`，再以该提示词指导
   Skill 的非生成式处理；不得调用生图模型。
-- `artistic`：不由本 Skill 执行。后端 Agent 使用 Kimi 多模态生成美化建议，再调用
+- `artistic`：不由本 Skill 执行。后端 Agent 使用 StarunAgentModel 多模态生成美化建议，再调用
   腾讯混元图生图。

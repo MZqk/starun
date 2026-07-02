@@ -67,7 +67,8 @@ from stretch import auto_stretch, arcsinh_stretch, masked_stretch, deep_stretch,
 from denoise import denoise_luminance_chroma
 from sharpen import multiscale_sharpen, adaptive_signal_sharpen
 from star_tools import (separate_stars, reduce_stars, combine_starless_stars,
-                        mild_star_reduce_full, detect_stars, estimate_fwhm)
+                        mild_star_reduce_full, detect_stars, estimate_fwhm,
+                        find_starnet_executable)
 from enhance import (hdr_multiscale_compress, protected_hdr_compress, apply_curves,
                      local_nebula_enhance, positive_starless_detail_enhance)
 from color_tools import (auto_color_calibrate, emission_nebula_calibrate,
@@ -152,11 +153,11 @@ STRENGTH_PRESETS = {
         'star_threshold': 0.78,     # very_dense 星场降低阈值
         'stretch_factor': 120.0,
         'target_bg': 0.06,          # lower background for deeper space
-        'star_stretch_factor': 24.0,
-        'star_scnr_strength': 0.0,  # 无绿噪
-        'star_reduction': 0.40,     # very_dense 强缩星
-        'star_curves_midtones': 1.1,
-        'star_combine_strength': 1.0,
+        'star_stretch_factor': 10.0,
+        'star_scnr_strength': 0.10,
+        'star_reduction': 0.32,
+        'star_curves_midtones': 1.0,
+        'star_combine_strength': 0.55,
         'hdr_strength': 0.35,       # 发射星云 HDR +0.15 偏移
         'sharpen_amount': 0.6,
         'saturation': 1.45,         # lower saturation to prevent color cast
@@ -167,7 +168,7 @@ STRENGTH_PRESETS = {
         'stretch_gamma': 0.42,      # higher gamma to push noise into shadows
     },
     'emission': {
-        # 发射星云专用预设：保护 Hα 红色主导，激进拉伸，强缩星
+        # 发射星云专用预设：保护 Hα 红色主导，保守星点分离重组
         'dbe_method': 'rbf',
         'dbe_degree': 3,
         'dbe_pctl_low': 0.1,
@@ -177,11 +178,11 @@ STRENGTH_PRESETS = {
         'star_threshold': 0.78,      # very_dense 星场降低阈值
         'stretch_factor': 120.0,
         'target_bg': 0.06,           # lower background
-        'star_stretch_factor': 18.0,
-        'star_scnr_strength': 0.0,
-        'star_reduction': 0.40,      # very_dense 星场强缩星
-        'star_curves_midtones': 1.05,
-        'star_combine_strength': 0.85,
+        'star_stretch_factor': 8.0,
+        'star_scnr_strength': 0.10,
+        'star_reduction': 0.32,
+        'star_curves_midtones': 0.98,
+        'star_combine_strength': 0.45,
         'hdr_strength': 0.35,        # 发射星云 HDR +0.15 偏移
         'sharpen_amount': 0.65,
         'saturation': 1.45,          # lower saturation to prevent color cast
@@ -217,8 +218,18 @@ ALL_STEPS = ['dbe', 'color', 'pre_denoise', 'star_remove', 'stretch',
              'style', 'star_combine', 'final_denoise', 'local_enhance',
              'external_detail', 'star_reduce']
 EMISSION_STEPS = [
-    'color', 'stretch', 'final_color', 'style', 'local_enhance', 'star_reduce'
+    'color', 'star_remove', 'stretch', 'star_process', 'final_color',
+    'star_combine', 'style', 'local_enhance'
 ]
+STAR_SEPARATION_STEPS = ['star_remove', 'star_process', 'star_combine']
+STAR_SEPARATION_TARGET_TYPES = {
+    'emission_nebula',
+    'reflection_nebula',
+    'galaxy',
+    'planetary_nebula',
+    'dark_nebula',
+    'wide_field',
+}
 
 
 def resolve_step_dependencies(steps):
@@ -250,6 +261,46 @@ def resolve_step_dependencies(steps):
 
     ordered = [step for step in ALL_STEPS if step in expanded]
     return ordered, log
+
+
+def should_prefer_star_separation(steps, target_type, target_name, analysis_report=None):
+    """Return whether star separation should be part of the normal workflow."""
+    if _is_star_poi_target(target_type, target_name):
+        return False
+    if any(step in steps for step in STAR_SEPARATION_STEPS):
+        return False
+
+    normalized_type = str(target_type or "").lower()
+    if normalized_type in STAR_SEPARATION_TARGET_TYPES:
+        return True
+
+    if analysis_report:
+        star_density = analysis_report.get("starfield", {}).get("star_density")
+        if star_density in ("dense", "very_dense"):
+            return True
+        ai_tools = analysis_report.get("recommendations", {}).get("ai_tools", {})
+        if ai_tools.get("ai_star_removal_recommended"):
+            return True
+
+    return False
+
+
+def promote_star_separation_steps(steps, target_type, target_name, analysis_report=None):
+    """Promote suitable deep-sky workflows from simple star reduction to separation."""
+    if not should_prefer_star_separation(steps, target_type, target_name, analysis_report):
+        return list(steps), []
+
+    promoted = [step for step in steps if step != "star_reduce"]
+    for step in STAR_SEPARATION_STEPS:
+        if step not in promoted:
+            promoted.append(step)
+    promoted, dependency_log = resolve_step_dependencies(promoted)
+    log = [
+        "⭐ 星点分离默认提升: 已加入 star_remove, star_process, star_combine"
+    ]
+    if "star_reduce" in steps:
+        log.append("⭐ 星点分离默认提升: star_reduce 已改为分离重组链路")
+    return promoted, log + dependency_log
 
 
 def resolve_ghs_b(cfg):
@@ -755,11 +806,21 @@ def build_config_from_analysis(report, base_preset='medium', target_type=None):
     star_density = report.get('starfield', {}).get('star_density') if report else None
     if star_density in ('dense', 'very_dense'):
         cfg['prefer_external_starless'] = True
+        cfg['star_stretch_factor'] = min(
+            cfg.get('star_stretch_factor', 10.0), 10.0
+        )
+        cfg['star_scnr_strength'] = min(
+            cfg.get('star_scnr_strength', 0.10), 0.10
+        )
+        cfg['star_curves_midtones'] = min(
+            cfg.get('star_curves_midtones', 1.0), 1.0
+        )
         cfg['star_combine_strength'] = min(
-            cfg.get('star_combine_strength', 1.0), 0.82
+            cfg.get('star_combine_strength', 1.0), 0.55
         )
         reasons.append(
             f"Stars: density={star_density}, prefer external StarNet++ "
+            f"with conservative star layer stretch={cfg['star_stretch_factor']} "
             f"and combine_strength={cfg['star_combine_strength']}"
         )
 
@@ -1415,10 +1476,12 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
                 print(f"  [参数覆盖] {key}: {old_value} → {value}")
 
     # ── 天体类型安全规则（将 target_awareness.md 落实到代码） ──
+    user_steps_explicit = steps is not None
     if steps is None:
         steps = list(EMISSION_STEPS) if preset == 'emission' else list(ALL_STEPS)
         if preset == 'emission' and external_starless:
-            steps.insert(steps.index('star_reduce'), 'external_detail')
+            steps.insert(steps.index('star_combine'), 'external_detail')
+        dependency_log = []
     else:
         steps = [s.strip() for s in steps.split(',')]
         invalid = [s for s in steps if s not in ALL_STEPS]
@@ -1429,8 +1492,12 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
             )
         steps, dependency_log = resolve_step_dependencies(steps)
 
-    if steps is not None and 'dependency_log' not in locals():
-        dependency_log = []
+    promoted_steps, promotion_log = promote_star_separation_steps(
+        steps, target_type, target_name, analysis_report
+    )
+    if promotion_log:
+        steps = promoted_steps
+        dependency_log.extend(promotion_log)
 
     if dependency_log:
         print("\n  ── 步骤依赖规则 ──")
@@ -1476,6 +1543,27 @@ def run_pipeline(input_path, output_path, steps=None, preset='medium',
         ):
             steps.remove('dbe')
             print("    🛡️ 发射星云: 诊断显示无显著梯度，自动跳过 DBE")
+
+    if (
+        'star_remove' in steps
+        and not external_starless
+        and not use_starnet
+        and cfg.get('prefer_external_starless')
+    ):
+        auto_starnet_path = find_starnet_executable(starnet_path)
+        if auto_starnet_path:
+            use_starnet = True
+            starnet_path = auto_starnet_path
+            message = f"⭐ 星点分离: 检测到可用 StarNet2，自动启用 {auto_starnet_path}"
+            safety_log.append(message)
+            print(f"    {message}")
+        elif user_steps_explicit:
+            message = (
+                "⭐ 星点分离: 当前目标建议 StarNet2，但未找到可执行文件；"
+                "将使用内置形态学去星，若质量不足会显式回退"
+            )
+            safety_log.append(message)
+            print(f"    {message}")
 
     keep_intermediates = bool(save_intermediates or keep_all)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')

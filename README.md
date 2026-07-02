@@ -88,11 +88,11 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 ./node_modules/.bin/next dev --we
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `STARUN_AI_BASE_URL` | `https://api.moonshot.cn/v1` | OpenAI-compatible 文本/多模态模型 API 地址。 |
-| `STARUN_AI_API_KEY` | 空 | Kimi 等多模态模型服务端密钥。必须配置后才能执行真实 AI 分析和出图规划。 |
-| `STARUN_AI_MODEL` | `kimi-k2.6` | 专业分析和出图规划使用的模型。 |
+| `STARUN_AI_API_KEY` | 空 | StarunAgentModel 等多模态模型服务端密钥。必须配置后才能执行真实 AI 分析和出图规划。 |
+| `STARUN_AI_MODEL` | `StarunAgentModel` | 专业分析和出图规划使用的模型。 |
 | `STARUN_AI_TIMEOUT_SECONDS` | `180` | 专业分析和出图规划请求超时时间。 |
-| `STARUN_ART_DIRECTION_AI_TIMEOUT_SECONDS` | `600` | 艺术模式下 Kimi 视觉识别与提示词生成的超时时间。 |
-| `STARUN_IMAGE_AI_BASE_URL` | `https://tokenhub.tencentmaas.com/v1` | OpenAI-compatible 图片生成 API 地址。 |
+| `STARUN_ART_DIRECTION_AI_TIMEOUT_SECONDS` | `600` | 艺术模式下 StarunAgentModel 视觉识别与提示词生成的超时时间。 |
+| `STARUN_IMAGE_AI_BASE_URL` | `https://tokenhub.tencentmaas.com/v1` | 图片生成 API 地址；请求体按腾讯混元图生图字段发送 `Prompt`、`Images` Base64 参考图和 `Resolution`。 |
 | `STARUN_IMAGE_AI_API_KEY` | 空 | 图片生成模型服务端密钥。 |
 | `STARUN_IMAGE_AI_MODEL` | `hy-image-v3.0` | AI 自动出图使用的图片生成模型。 |
 | `STARUN_IMAGE_AI_TIMEOUT_SECONDS` | `300` | 图片生成和下载请求超时时间。 |
@@ -107,7 +107,7 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 ./node_modules/.bin/next dev --we
 - 首页产品介绍。
 - FITS 文件上传、HDU 扫描与选择、头信息、图像尺寸、位深和基础统计。
 - 专业分析：程序提取 FITS 元数据与基础统计，渲染预览图，再由多模态模型生成专业解读和后期建议。
-- AI 自动出图：复用 FITS 预览与统计数据，由 Kimi 生成出图方向，再调用图片生成模型基于参考图生成艺术增强结果。
+- AI 自动出图：复用 FITS 预览与统计数据，由 StarunAgentModel 生成出图方向，再调用图片生成模型基于参考图生成艺术增强结果。
 - 历史记录：浏览器本地记录分析和处理任务，API 侧保留任务状态、事件和产物。
 
 当前限制：

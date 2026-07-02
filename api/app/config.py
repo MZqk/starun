@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     min_free_disk_bytes: int = 5 * 1024 * 1024 * 1024
     ai_base_url: str = "https://api.moonshot.cn/v1"
     ai_api_key: SecretStr | None = None
-    ai_model: str = "kimi-k2.6"
+    ai_model: str = "StarunAgentModel"
     ai_timeout_seconds: float = Field(default=180, gt=0, le=600)
     art_direction_ai_timeout_seconds: float = Field(default=600, gt=0, le=900)
     agent_protocol: AgentProtocol = AgentProtocol.CHAT_COMPLETIONS

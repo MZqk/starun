@@ -1,7 +1,10 @@
 import base64
 import binascii
 import asyncio
+import hashlib
 from io import BytesIO
+import json
+import logging
 import math
 from urllib.parse import urlparse
 
@@ -9,7 +12,10 @@ import httpx
 from PIL import Image, ImageOps
 from pydantic import SecretStr
 
+from app.artifacts.contracts import JsonValue
 from app.processing.models import ArtDirection, GeneratedArtwork
+
+logger = logging.getLogger(__name__)
 
 
 IMAGE_GENERATION_SIZES = (
@@ -96,21 +102,43 @@ class TokenHubImageProvider:
         generation_width, generation_height = (
             int(part) for part in generation_size.split("x", maxsplit=1)
         )
-        payload = {
-            "model": self._model,
-            "prompt": _final_prompt(
-                direction,
-                reference_width=reference_width,
-                reference_height=reference_height,
-                generation_width=generation_width,
-                generation_height=generation_height,
-            ),
-            "image": "data:image/png;base64," + base64.b64encode(reference_png).decode("ascii"),
-            "size": generation_size,
-            "response_format": "b64_json",
-            "n": 1,
-            "LogoAdd": 0,
+        reference_base64 = base64.b64encode(reference_png).decode("ascii")
+        prompt = _final_prompt(
+            direction,
+            reference_width=reference_width,
+            reference_height=reference_height,
+            generation_width=generation_width,
+            generation_height=generation_height,
+        )
+        request_controls: dict[str, JsonValue] = {
+            "image_reference_transport": "ImagesBase64",
+            "reference_image_count": 1,
+            "revise": 0,
         }
+        payload = {
+            "Model": self._model,
+            "Prompt": prompt,
+            "Images": [reference_base64],
+            "Resolution": generation_size.replace("x", ":"),
+            "LogoAdd": 0,
+            "Revise": 0,
+        }
+        logger.debug(
+            "Image generation request payload: url=%s body=%s",
+            self._url,
+            json.dumps(
+                _loggable_generation_payload(
+                    payload,
+                    reference_png=reference_png,
+                    reference_width=reference_width,
+                    reference_height=reference_height,
+                    generation_width=generation_width,
+                    generation_height=generation_height,
+                ),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        )
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.post(
@@ -145,6 +173,7 @@ class TokenHubImageProvider:
         return await self._parse_generation_response(
             response,
             requested_size=(generation_width, generation_height),
+            request_controls=request_controls,
         )
 
     async def _parse_generation_response(
@@ -152,18 +181,17 @@ class TokenHubImageProvider:
         response: httpx.Response,
         *,
         requested_size: tuple[int, int],
+        request_controls: dict[str, JsonValue],
     ) -> GeneratedArtwork:
         try:
             body = response.json()
-            first = body["data"][0]
-        except (KeyError, IndexError, TypeError, ValueError) as exc:
+        except ValueError as exc:
             raise ImageProviderError(
                 "image_provider_invalid_response",
                 "Image provider returned an invalid response.",
                 retryable=True,
             ) from exc
-        request_id = body.get("request_id")
-        revised_prompt = first.get("revised_prompt")
+        first, request_id, revised_prompt = _generation_result_from_response(body)
         b64_json = first.get("b64_json")
         if isinstance(b64_json, str) and b64_json:
             try:
@@ -174,7 +202,7 @@ class TokenHubImageProvider:
                     "Image provider returned invalid image data.",
                     retryable=True,
                 ) from exc
-            return _decode_image(data, None, request_id, revised_prompt, requested_size)
+            return _decode_image(data, None, request_id, revised_prompt, requested_size, request_controls)
         url = first.get("url")
         if not isinstance(url, str) or not url:
             raise ImageProviderError(
@@ -183,7 +211,7 @@ class TokenHubImageProvider:
                 retryable=True,
             )
         data, host = await self._download(url)
-        return _decode_image(data, host, request_id, revised_prompt, requested_size)
+        return _decode_image(data, host, request_id, revised_prompt, requested_size, request_controls)
 
     async def _download(self, url: str) -> tuple[bytes, str]:
         parsed = urlparse(url)
@@ -277,6 +305,7 @@ def _decode_image(
     request_id: object,
     revised_prompt: object,
     requested_size: tuple[int, int],
+    request_controls: dict[str, JsonValue],
 ) -> GeneratedArtwork:
     if len(data) == 0:
         raise ImageProviderError("image_provider_empty_image", "Generated image is empty.", retryable=True)
@@ -327,6 +356,99 @@ def _decode_image(
         provider_request_id=request_id if isinstance(request_id, str) else None,
         revised_prompt=revised_prompt if isinstance(revised_prompt, str) else None,
         source_url_host=host,
+        provider_request_controls=request_controls,
+    )
+
+
+def _loggable_generation_payload(
+    payload: dict[str, JsonValue],
+    *,
+    reference_png: bytes,
+    reference_width: int,
+    reference_height: int,
+    generation_width: int,
+    generation_height: int,
+) -> dict[str, JsonValue]:
+    logged: dict[str, JsonValue] = {}
+    for key, value in payload.items():
+        if key in {"image", "reference_image"} and isinstance(value, str):
+            logged[key] = _image_data_url_summary(value, reference_png)
+        elif key == "Images" and isinstance(value, list):
+            logged[key] = [
+                _base64_image_summary(item, reference_png)
+                if isinstance(item, str)
+                else {"present": False, "type": type(item).__name__}
+                for item in value
+            ]
+        else:
+            logged[key] = value
+    logged["reference_metadata"] = {
+        "width": reference_width,
+        "height": reference_height,
+        "png_bytes": len(reference_png),
+        "sha256": hashlib.sha256(reference_png).hexdigest(),
+    }
+    logged["requested_generation_size"] = {
+        "width": generation_width,
+        "height": generation_height,
+    }
+    return logged
+
+
+def _base64_image_summary(encoded: str, reference_png: bytes) -> dict[str, JsonValue]:
+    return {
+        "present": bool(encoded),
+        "format": "base64",
+        "base64_chars": len(encoded),
+        "decoded_bytes": len(reference_png),
+        "decoded_sha256": hashlib.sha256(reference_png).hexdigest(),
+    }
+
+
+def _image_data_url_summary(data_url: str, reference_png: bytes) -> dict[str, JsonValue]:
+    prefix, separator, encoded = data_url.partition(",")
+    return {
+        "present": bool(separator and encoded),
+        "mime": prefix.removeprefix("data:").removesuffix(";base64"),
+        "data_url_prefix": prefix + separator,
+        "base64_chars": len(encoded) if separator else 0,
+        "decoded_bytes": len(reference_png),
+        "decoded_sha256": hashlib.sha256(reference_png).hexdigest(),
+    }
+
+
+def _generation_result_from_response(
+    body: object,
+) -> tuple[dict[str, object], object, object]:
+    if not isinstance(body, dict):
+        raise ImageProviderError(
+            "image_provider_invalid_response",
+            "Image provider returned an invalid response.",
+            retryable=True,
+        )
+    data = body.get("data")
+    if isinstance(data, list) and data and isinstance(data[0], dict):
+        return data[0], body.get("request_id"), data[0].get("revised_prompt")
+
+    raw_response = body.get("Response")
+    if isinstance(raw_response, dict):
+        result_images = raw_response.get("ResultImage")
+        if isinstance(result_images, list) and result_images and isinstance(result_images[0], str):
+            revised_prompt = raw_response.get("RevisedPrompt")
+            prompt = revised_prompt[0] if isinstance(revised_prompt, list) and revised_prompt else None
+            return {"url": result_images[0], "revised_prompt": prompt}, raw_response.get("RequestId"), prompt
+        job_id = raw_response.get("JobId")
+        if isinstance(job_id, str) and job_id:
+            raise ImageProviderError(
+                "image_provider_async_job_unhandled",
+                "Image provider returned an async JobId but no generated image URL.",
+                retryable=True,
+            )
+
+    raise ImageProviderError(
+        "image_provider_invalid_response",
+        "Image provider returned an invalid response.",
+        retryable=True,
     )
 
 
@@ -339,14 +461,35 @@ def _final_prompt(
     generation_height: int,
 ) -> str:
     return (
-        "这是图像到图像的忠实后期增强，不是重新创作。逐像素参考输入图，完整保留原始视场、"
-        "裁切范围、主体轮廓、暗部结构以及每颗可见恒星的位置、数量、大小和亮度关系。只能调整"
-        "全局色彩、亮度、对比度、降噪和轻微清晰度；不得生成、删除、移动或替换任何星体、星云、"
-        "尘埃或纹理。不要根据天体名称或常见图库想象画面，不要把弱结构扩写成新的细丝或云气。"
+        "这是一次基于输入图像的深空天文照片后期增强，而不是重新创作、重绘或生成另一张"
+        "同类天体图片。"
+        "\n\n请严格逐像素参考原始输入图，完整保留原始视场、构图、裁切范围、方向、主体轮廓、"
+        "暗部结构、星云边界、尘埃分布，以及每一颗可见恒星的位置、数量、大小和相对亮度关系。"
+        "不得生成、删除、移动、替换、扩写或重塑任何星体、星云、尘埃、暗带、细丝、纹理或背景结构。"
+        "\n\n只允许进行真实深空后期范畴内的克制增强，包括：背景降噪、轻微星点控制、非线性拉伸、"
+        "色彩校准、色调映射、局部对比度优化、亮度平衡、饱和度增强和轻微清晰度提升。所有调整"
+        "都必须基于原图已有信号，不得凭天体名称、常见图库、想象效果或艺术风格补充不存在的结构。"
+        "\n\n具体增强目标如下："
+        "\n\n1. 背景降噪：对背景区域进行精细降噪，降低彩噪、颗粒感和脏背景，同时保留暗弱星云、"
+        "尘埃和渐变层次，避免过度磨皮或塑料感。"
+        "\n2. 星点控制：对星点进行温和的掩膜控制和轻微收缩，降低亮星对主体的干扰，但必须保留"
+        "所有可见恒星的位置、数量、大小层级和亮度关系，不得制造星点消失、星点位移或新增星点。"
+        "\n3. 非线性拉伸：通过克制的非线性拉伸提升暗弱星云结构的可见度，同时保护高光区域，"
+        "避免核心过曝、亮部断层、星点膨胀或背景被拉灰。"
+        "\n4. 色调映射与对比度优化：优化整体明暗层次和局部对比度，使星云结构更加清晰、立体、"
+        "细腻，但不得把弱信号扩写成新的细丝、云气、暗带或不存在的纹理。"
+        "\n5. 色彩校准：对背景、星点和星云进行自然的色彩平衡校准，减少偏色和色块污染，使背景"
+        "接近中性，星云色彩鲜明但不过度荧光化。"
+        "\n6. 微哈勃色倾向：在原始图像已有色彩和通道信息基础上，可以加入轻微的 SHO / Hubble "
+        "Palette 色彩倾向，增强青蓝、金黄、橙红等层次表现，但不得强行改造成完全不同的窄带"
+        "合成效果，不得覆盖原图真实结构。"
+        "\n\n"
         f"参考图尺寸为 {reference_width}x{reference_height}，输出必须严格为 "
-        f"{generation_width}x{generation_height}，方向和宽高比必须一致。"
-        "禁止添加任何文字、签名、Logo、显式或隐式水印、边框、角标和“AI生成”标识。"
-        "输出应像对同一张真实深空照片做克制后期，而不是插画或另一张同类天体照片。"
+        f"{generation_width}x{generation_height}，方向、视场和宽高比必须与输入图一致。"
+        "\n\n禁止添加任何文字、标题、签名、Logo、隐式水印、边框、角标、“AI生成”标识或任何装饰元素。"
+        "\n\n最终输出应像对同一张真实深空照片进行专业、克制、可信的后期增强：背景更干净，"
+        "星点更受控，星云结构更清晰，色彩更鲜明，层次更细腻，视觉冲击力更强，但画面内容"
+        "必须与原图保持高度一致。"
         f"\n\n增强目标：{direction.generation_prompt}"
         f"\n\n避免：{direction.negative_prompt}"
     )

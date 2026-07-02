@@ -75,8 +75,6 @@ export function useTaskPolling(taskId: string | null): TaskPollingResult {
     let latestSequence = 0;
     let timedOut = false;
     const queuedSince = Date.now();
-    const pollingStartTime = Date.now();
-    const GLOBAL_TIMEOUT_MS = 180_000; // 3 minutes
     const api = getApiClient();
 
     queueMicrotask(() => {
@@ -137,21 +135,6 @@ export function useTaskPolling(taskId: string | null): TaskPollingResult {
     };
 
     const poll = async () => {
-      // 1. 全局轮询超时检查 (3分钟)
-      if (Date.now() - pollingStartTime > GLOBAL_TIMEOUT_MS) {
-        const timeoutError = new Error(
-          zhCN.task11.common.taskPollingTimeout ||
-            "任务状态同步超时，服务长时间未响应或已假死，请重试。"
-        );
-        timeoutError.name = "PollingTimeoutError";
-        setState((current) =>
-          current.taskId === taskId
-            ? { ...current, error: timeoutError, loading: false }
-            : current,
-        );
-        return; // 彻底停止轮询
-      }
-
       controller?.abort();
       if (requestTimeout) clearTimeout(requestTimeout);
 
@@ -240,14 +223,14 @@ export function useTaskPolling(taskId: string | null): TaskPollingResult {
         const nextError = timedOut
           ? new Error(
               zhCN.task11.common.taskPollingTimeout ||
-                "任务状态同步超时，服务长时间未响应或已假死，请重试。"
+                "任务状态同步暂时变慢，任务会继续运行。"
             )
           : (caught instanceof Error
               ? caught
               : new Error(zhCN.task11.common.taskPollingError));
 
         if (timedOut) {
-          nextError.name = "PollingTimeoutError";
+          nextError.name = "PollingSyncTimeoutError";
         }
 
         setState((current) =>
@@ -255,10 +238,6 @@ export function useTaskPolling(taskId: string | null): TaskPollingResult {
             ? { ...current, error: nextError, loading: false }
             : current,
         );
-
-        if (timedOut) {
-          return; // 请求超时假死，直接终止轮询
-        }
 
         if (
           nextError instanceof StarunApiError &&

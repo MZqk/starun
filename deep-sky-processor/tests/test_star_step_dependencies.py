@@ -39,6 +39,37 @@ class StarStepDependencyTests(unittest.TestCase):
         )
         self.assertTrue(log)
 
+    def test_emission_default_steps_include_star_separation_chain(self):
+        self.assertIn("star_remove", pipeline.EMISSION_STEPS)
+        self.assertIn("star_process", pipeline.EMISSION_STEPS)
+        self.assertIn("star_combine", pipeline.EMISSION_STEPS)
+        self.assertNotIn("star_reduce", pipeline.EMISSION_STEPS)
+
+    def test_enhancement_steps_promote_star_separation_for_emission_nebula(self):
+        steps, log = pipeline.promote_star_separation_steps(
+            ["color", "stretch", "final_color", "local_enhance", "star_reduce"],
+            "emission_nebula",
+            "NGC6888",
+            None,
+        )
+        self.assertIn("star_remove", steps)
+        self.assertIn("star_process", steps)
+        self.assertIn("star_combine", steps)
+        self.assertNotIn("star_reduce", steps)
+        self.assertTrue(log)
+
+    def test_star_cluster_steps_do_not_promote_star_separation(self):
+        steps, log = pipeline.promote_star_separation_steps(
+            ["color", "stretch", "final_color", "local_enhance"],
+            "globular_cluster",
+            "M13",
+            None,
+        )
+        self.assertNotIn("star_remove", steps)
+        self.assertNotIn("star_process", steps)
+        self.assertNotIn("star_combine", steps)
+        self.assertFalse(log)
+
     def test_pipeline_star_process_creates_processed_and_combined_artifacts(self):
         image = np.full((48, 64, 3), 0.03, dtype=np.float32)
         image[18:31, 24:41, 0] += 0.12
@@ -125,7 +156,8 @@ class StarStepDependencyTests(unittest.TestCase):
             target_type="emission_nebula",
         )
         self.assertTrue(config["prefer_external_starless"])
-        self.assertLessEqual(config["star_combine_strength"], 0.82)
+        self.assertLessEqual(config["star_stretch_factor"], 10.0)
+        self.assertLessEqual(config["star_combine_strength"], 0.55)
 
     def test_emission_fallback_switches_to_masked_ghs(self):
         image = np.full((48, 64, 3), 0.03, dtype=np.float32)

@@ -175,6 +175,28 @@ function parseMarkdownInline(text: string): React.ReactNode[] {
   });
 }
 
+function markdownTableCells(line: string): string[] {
+  return line
+    .replace(/^\s*\|/, "")
+    .replace(/\|\s*$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function isMarkdownTableSeparator(line: string): boolean {
+  const cells = markdownTableCells(line);
+  return (
+    cells.length > 0 &&
+    cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, "")))
+  );
+}
+
+function isMarkdownTableStart(lines: string[], index: number): boolean {
+  const current = lines[index]?.trim() ?? "";
+  const next = lines[index + 1]?.trim() ?? "";
+  return current.includes("|") && next.includes("|") && isMarkdownTableSeparator(next);
+}
+
 function MiniMarkdown({ content }: { content: string }) {
   const lines = content.replace(/\r\n/g, "\n").split("\n");
   const elements: React.ReactNode[] = [];
@@ -202,12 +224,64 @@ function MiniMarkdown({ content }: { content: string }) {
       continue;
     }
 
-    if (line.startsWith("#### ")) {
+    if (isMarkdownTableStart(lines, i)) {
+      flushList();
+      const headerCells = markdownTableCells(line);
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && lines[i].trim().includes("|")) {
+        rows.push(markdownTableCells(lines[i].trim()));
+        i++;
+      }
+      i--;
+      elements.push(
+        <div className="analysis-markdown-table-wrap" key={`table-${keyCounter++}`}>
+          <table>
+            <thead>
+              <tr>
+                {headerCells.map((cell, cellIndex) => (
+                  <th key={`th-${cellIndex}`}>{parseMarkdownInline(cell)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={`tr-${rowIndex}`}>
+                  {headerCells.map((_, cellIndex) => (
+                    <td key={`td-${rowIndex}-${cellIndex}`}>
+                      {parseMarkdownInline(row[cellIndex] ?? "")}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    } else if (line.startsWith(">")) {
+      flushList();
+      const quoteLines: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith(">")) {
+        quoteLines.push(lines[i].trim().replace(/^>\s?/, ""));
+        i++;
+      }
+      i--;
+      elements.push(
+        <blockquote key={`quote-${keyCounter++}`}>
+          {quoteLines.map((quoteLine, quoteIndex) => (
+            <p key={`quote-line-${quoteIndex}`}>{parseMarkdownInline(quoteLine)}</p>
+          ))}
+        </blockquote>
+      );
+    } else if (line.startsWith("## ")) {
+      flushList();
+      elements.push(<h4 key={`h4-${keyCounter++}`}>{parseMarkdownInline(line.slice(3))}</h4>);
+    } else if (line.startsWith("#### ")) {
       flushList();
       elements.push(<h5 key={`h5-${keyCounter++}`}>{parseMarkdownInline(line.slice(5))}</h5>);
     } else if (line.startsWith("### ")) {
       flushList();
-      elements.push(<h4 key={`h4-${keyCounter++}`}>{parseMarkdownInline(line.slice(4))}</h4>);
+      elements.push(<h5 key={`h5-${keyCounter++}`}>{parseMarkdownInline(line.slice(4))}</h5>);
     } else if (line.startsWith("- ") || line.startsWith("* ")) {
       if (listType !== "ul") {
         flushList();
@@ -732,7 +806,7 @@ export default function AnalysisPage() {
           task={task}
         />
 
-        {((task && task.status === "failed") || (!task && initialStatus === "failed") || (error && error.name === "PollingTimeoutError")) && (
+        {((task && task.status === "failed") || (!task && initialStatus === "failed")) && (
           <div className="recovery-panel">
             <div className="border-mask" aria-hidden="true" />
             <div className="recovery-header">
@@ -853,7 +927,7 @@ export default function AnalysisPage() {
                         </button>
                       )}
                     </div>
-                    <span style={{ fontSize: "0.82rem", opacity: 0.65 }}>{String(summary?.model ?? "kimi-k2.6")}</span>
+                    <span style={{ fontSize: "0.82rem", opacity: 0.65 }}>{String(summary?.model ?? "StarunAgentModel")}</span>
                   </div>
                   <div className="analysis-preview-layout">
                     <div>

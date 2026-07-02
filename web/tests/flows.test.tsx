@@ -430,7 +430,7 @@ describe("Task 11 flows", () => {
         result: {
           manifest_available: true,
           summary: {
-            model: "kimi-k2.6",
+            model: "StarunAgentModel",
             analysis: {
               overview: "整体可进入后期，但需要保护星云弱信号。",
               image_quality: {
@@ -556,6 +556,12 @@ describe("Task 11 flows", () => {
               "",
               "IC 434 markdown output",
               "",
+              "> 预览图经过自动拉伸，以下判断只用于后期方向。",
+              "",
+              "| 指标 | 判断 | 建议 |",
+              "| --- | --- | --- |",
+              "| 背景 | 轻微梯度 | 先做背景校正 |",
+              "",
               "## 2. Siril 软件的后期关键步骤",
               "",
               "Siril 分档内容",
@@ -581,6 +587,13 @@ describe("Task 11 flows", () => {
 
     expect(await screen.findByText(/IC 434 markdown output/)).toBeVisible();
     expect(screen.getByRole("heading", { name: "深空天体后期处理建议" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "1. 整体后期处理建议" })).toBeVisible();
+    expect(screen.getByText("预览图经过自动拉伸，以下判断只用于后期方向。")).toBeVisible();
+    const table = screen.getByRole("table");
+    expect(within(table).getByRole("columnheader", { name: "指标" })).toBeVisible();
+    expect(within(table).getByRole("cell", { name: "先做背景校正" })).toBeVisible();
+    expect(screen.queryByText(/## 1\. 整体后期处理建议/)).not.toBeInTheDocument();
+    expect(screen.queryByText("| 指标 | 判断 | 建议 |")).not.toBeInTheDocument();
     const softwareColumns = screen.getByLabelText("Siril 与 PixInsight 后期关键步骤");
     expect(within(softwareColumns).getByRole("heading", { name: "Siril 软件的后期关键步骤" })).toBeVisible();
     expect(within(softwareColumns).getByRole("heading", { name: "PixInsight 软件的后期关键步骤" })).toBeVisible();
@@ -1128,6 +1141,45 @@ describe("Task 11 flows", () => {
     expect(persistence).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps long-running processing polls alive after a slow status request", async () => {
+    vi.useFakeTimers();
+    const abortableTimeout = <T,>() =>
+      new Promise<T>((_resolve, reject) => {
+        const signal = api.getTask.mock.calls.at(-1)?.[1]?.signal as AbortSignal | undefined;
+        signal?.addEventListener("abort", () => {
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+        });
+      });
+    api.getTask
+      .mockImplementationOnce(() => abortableTimeout<TaskDetailResponse>())
+      .mockResolvedValueOnce(taskDetail({ id: "slow-processing", status: "completed" }));
+    api.getTaskEvents
+      .mockImplementationOnce(() => abortableTimeout<TaskEventsResponse>())
+      .mockResolvedValueOnce({
+        events: [],
+        has_more: false,
+        next_after: 0,
+      });
+
+    render(<PollingProbe taskId="slow-processing" />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(screen.getByText("error:PollingSyncTimeoutError")).toBeVisible();
+    expect(screen.queryByText("error:PollingTimeoutError")).not.toBeInTheDocument();
+    expect(api.getTask).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+
+    expect(api.getTask).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("status:completed")).toBeVisible();
+    expect(screen.getByText("error:none")).toBeVisible();
+  });
+
   it("resets task state and event cursor and ignores stale prior-task responses", async () => {
     const firstTask = deferred<TaskDetailResponse>();
     const firstEvents = deferred<TaskEventsResponse>();
@@ -1242,6 +1294,7 @@ function PollingProbe({ taskId }: { taskId: string }) {
       <span>task:{result.task?.id ?? "none"}</span>
       <span>status:{result.task?.status ?? "none"}</span>
       <span>events:{result.events.length}</span>
+      <span>error:{result.error?.name ?? "none"}</span>
       <span>persistence:{result.persistenceError?.message ?? "none"}</span>
     </div>
   );

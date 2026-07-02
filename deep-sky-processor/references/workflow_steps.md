@@ -66,7 +66,7 @@ python scripts/pipeline.py input.fits preview.jpg \
 | 明显光害/渐晕 | 加 `dbe`，优先低强度；宽场 Hα 背景要谨慎 |
 | 极暗但低噪 | 增强 `stretch_factor` 或使用 emission/deep stretch |
 | 噪声明显 | 加 `pre_denoise` 或 `final_denoise`，强度保守 |
-| 星点压目标 | 加 `star_reduce`；密集星场优先建议外部 StarNet++ |
+| 星点压目标 / 密集星场 | 优先运行 `star_remove,star_process,star_combine`；本地 StarNet2 可用时自动使用。若分离质量边际或失败，明确记录原因后再降级为 `star_reduce` |
 | 星云太平 | 加 `local_enhance` 或 `enhance`，避免 HDR/CLAHE 光晕 |
 | 偏品红/电蓝 | 降低 `saturation`，发射星云保护 Hα/OIII 比例 |
 | 核心过曝 | 降低拉伸、提高 HDR、输出更保守版本 |
@@ -80,12 +80,14 @@ python scripts/pipeline.py input.fits output_enhanced.jpg \
   --target-type emission_nebula \
   --target-name NGC6888 \
   --color-mode emission \
-  --style auto \
-  --style-strength 1.0 \
-  --steps color,stretch,final_color,local_enhance,star_reduce,style \
-  --override-params '{"stretch_factor":72,"saturation":1.55,"star_reduction":0.25}' \
+  --steps color,star_remove,stretch,star_process,final_color,star_combine,local_enhance \
+  --override-params '{"stretch_factor":72,"saturation":1.2,"star_stretch_factor":8,"star_combine_strength":0.45}' \
   --keep-all
 ```
+
+若用户显式给出增强步骤但遗漏星点分离，管线会在适合星点分离的目标上自动补入
+`star_remove`、`star_process` 和 `star_combine`。球状星团、疏散星团、M45
+等星点即主体的目标仍会自动禁用这条链路。
 
 AI 自动风格选择规则（`--style auto` 时）：
 - 发射星云或 `color-mode emission` → `dramatic_nebula`
@@ -135,8 +137,9 @@ python scripts/quality_metrics.py output_enhanced.jpg
 - 发射星云最终背景偏低只作为审查警告；是否保留真实 Hα/暗尘仍需看图。
 
 密集星场处理：
-- `dense/very_dense` 默认优先建议 StarNet++ 外部无星层，并降低星点重混合强度。
+- `dense/very_dense` 默认提升为 StarNet2/外部无星层优先流程，并降低星点层拉伸、SCNR、曲线和重混合强度。
 - 内置去星质量不达标时保持安全回退，不降低质量阈值强行接受。
+- StarNet 输出 `accepted_marginal` 时必须保留分离层并审查暗环、亮环、壳层误删、星点偏色和重组过强；必要时降低 `star_stretch_factor`、`star_combine_strength` 或降级到 `star_reduce`。
 - 发射星云去星回退后，自动改用 `masked_ghs` 保护星核和背景。
 - 带星图局部增强与最终缩星复用线性星点蒙版，避免强化星核或误缩亮壳层。
 - 发射星云颜色阶段保护青色 OIII 候选区域，避免 SCNR 与品红修正误伤。

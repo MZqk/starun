@@ -5,7 +5,7 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from app.analysis.kimi import KimiAnalysisClient
+from app.analysis.starun_agent_model import StarunAgentModelAnalysisClient
 from app.fits.schemas import FitsInspection
 
 
@@ -121,10 +121,10 @@ async def test_professional_analysis_enables_model_thinking(
             )
 
     monkeypatch.setattr(httpx, "AsyncClient", CapturingAsyncClient)
-    client = KimiAnalysisClient(
+    client = StarunAgentModelAnalysisClient(
         base_url="https://api.moonshot.cn/v1",
         api_key=SecretStr("secret"),
-        model="kimi-k2.6",
+        model="StarunAgentModel",
         timeout_seconds=30,
     )
 
@@ -136,6 +136,6 @@ async def test_professional_analysis_enables_model_thinking(
 
     assert captured["url"] == "https://api.moonshot.cn/v1/chat/completions"
     assert captured["headers"]["Authorization"] == "Bearer secret"
-    assert captured["json"]["model"] == "kimi-k2.6"
+    assert captured["json"]["model"] == "StarunAgentModel"
     assert captured["json"]["thinking"] == {"type": "enabled"}
     assert result.image_quality.rating == "good"

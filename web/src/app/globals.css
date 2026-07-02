@@ -1900,6 +1900,50 @@ progress::-moz-progress-bar {
   color: var(--color-space-accent);
 }
 
+.analysis-markdown blockquote {
+  margin: 0 0 0.95rem;
+  padding: 0.75rem 0.9rem;
+  border-left: 3px solid rgba(125, 155, 118, 0.72);
+  border-radius: 0 6px 6px 0;
+  background: rgba(125, 155, 118, 0.08);
+  color: var(--color-space-text);
+}
+
+.analysis-markdown blockquote p {
+  margin-bottom: 0.45rem;
+}
+
+.analysis-markdown-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin: 0.2rem 0 1rem;
+}
+
+.analysis-markdown table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.analysis-markdown th,
+.analysis-markdown td {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.analysis-markdown th {
+  color: var(--color-space-text);
+  background: rgba(255, 255, 255, 0.06);
+  font-weight: 700;
+}
+
+.analysis-markdown td {
+  color: var(--color-space-text-secondary);
+}
+
 .analysis-markdown ul {
   list-style-type: disc;
   margin: 0 0 0.85rem;

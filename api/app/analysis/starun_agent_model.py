@@ -9,17 +9,17 @@ from app.analysis.models import ProfessionalAnalysis
 from app.fits.schemas import FitsInspection
 
 
-class KimiConfigurationError(RuntimeError):
+class StarunAgentModelConfigurationError(RuntimeError):
     pass
 
 
-class KimiAnalysisError(RuntimeError):
+class StarunAgentModelAnalysisError(RuntimeError):
     def __init__(self, message: str, *, retryable: bool) -> None:
         super().__init__(message)
         self.retryable = retryable
 
 
-class KimiAnalysisClient:
+class StarunAgentModelAnalysisClient:
     def __init__(
         self,
         *,
@@ -29,7 +29,9 @@ class KimiAnalysisClient:
         timeout_seconds: float,
     ) -> None:
         if api_key is None or not api_key.get_secret_value().strip():
-            raise KimiConfigurationError("Kimi API key is not configured.")
+            raise StarunAgentModelConfigurationError(
+                "StarunAgentModel API key is not configured."
+            )
         self._url = f"{base_url.rstrip('/')}/chat/completions"
         self._api_key = api_key.get_secret_value()
         self._model = model
@@ -97,17 +99,17 @@ class KimiAnalysisClient:
                     json=payload,
                 )
         except (httpx.TimeoutException, httpx.NetworkError) as exc:
-            raise KimiAnalysisError(
-                "Kimi analysis service is temporarily unreachable.",
+            raise StarunAgentModelAnalysisError(
+                "StarunAgentModel analysis service is temporarily unreachable.",
                 retryable=True,
             ) from exc
 
         if response.status_code >= 400:
             retryable = response.status_code == 429 or response.status_code >= 500
             provider_message = _provider_error_message(response)
-            raise KimiAnalysisError(
+            raise StarunAgentModelAnalysisError(
                 (
-                    f"Kimi analysis request failed with status {response.status_code}"
+                    f"StarunAgentModel analysis request failed with status {response.status_code}"
                     f": {provider_message}"
                 ),
                 retryable=retryable,
@@ -119,8 +121,8 @@ class KimiAnalysisClient:
                 raise TypeError("completion content is not text")
             return ProfessionalAnalysis.model_validate_json(content)
         except (KeyError, IndexError, TypeError, ValueError, ValidationError) as exc:
-            raise KimiAnalysisError(
-                "Kimi returned an invalid structured analysis.",
+            raise StarunAgentModelAnalysisError(
+                "StarunAgentModel returned an invalid structured analysis.",
                 retryable=True,
             ) from exc
 

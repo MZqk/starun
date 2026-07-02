@@ -6,19 +6,19 @@ from typing import Any
 import httpx
 from pydantic import SecretStr, ValidationError
 
-from app.analysis.kimi import _inline_json_schema, _provider_error_message
+from app.analysis.starun_agent_model import _inline_json_schema, _provider_error_message
 from app.db.models import ProcessingStyle
 from app.fits.schemas import FitsInspection
 from app.processing.models import ArtDirection, ARTWORK_DISCLAIMER
 
 
-class KimiArtDirectionError(RuntimeError):
+class StarunAgentModelArtDirectionError(RuntimeError):
     def __init__(self, message: str, *, retryable: bool) -> None:
         super().__init__(message)
         self.retryable = retryable
 
 
-class KimiArtDirectionClient:
+class StarunAgentModelArtDirectionClient:
     def __init__(
         self,
         *,
@@ -28,7 +28,10 @@ class KimiArtDirectionClient:
         timeout_seconds: float,
     ) -> None:
         if api_key is None or not api_key.get_secret_value().strip():
-            raise KimiArtDirectionError("Kimi API key is not configured.", retryable=False)
+            raise StarunAgentModelArtDirectionError(
+                "StarunAgentModel API key is not configured.",
+                retryable=False,
+            )
         self._url = f"{base_url.rstrip('/')}/chat/completions"
         self._api_key = api_key.get_secret_value()
         self._model = model
@@ -85,9 +88,10 @@ class KimiArtDirectionClient:
         }
         response = await self._post_with_retry(payload)
         if response.status_code >= 400:
-            raise KimiArtDirectionError(
+            raise StarunAgentModelArtDirectionError(
                 (
-                    f"Kimi art direction request failed with status {response.status_code}: "
+                    "StarunAgentModel art direction request failed with status "
+                    f"{response.status_code}: "
                     f"{_provider_error_message(response)}"
                 ),
                 retryable=response.status_code == 429 or response.status_code >= 500,
@@ -99,13 +103,13 @@ class KimiArtDirectionClient:
                 raise TypeError("completion content is not text")
             return ArtDirection.model_validate_json(content)
         except ValidationError as exc:
-            raise KimiArtDirectionError(
-                f"Kimi returned an invalid art direction: {_validation_summary(exc)}",
+            raise StarunAgentModelArtDirectionError(
+                f"StarunAgentModel returned an invalid art direction: {_validation_summary(exc)}",
                 retryable=True,
             ) from exc
         except (KeyError, IndexError, TypeError, ValueError) as exc:
-            raise KimiArtDirectionError(
-                "Kimi returned an invalid art direction.",
+            raise StarunAgentModelArtDirectionError(
+                "StarunAgentModel returned an invalid art direction.",
                 retryable=True,
             ) from exc
 
@@ -127,7 +131,7 @@ class KimiArtDirectionClient:
                 if attempt == 0:
                     await asyncio.sleep(0.5)
         assert last_error is not None
-        raise KimiArtDirectionError(
+        raise StarunAgentModelArtDirectionError(
             _network_error_message(last_error),
             retryable=True,
         ) from last_error
@@ -172,14 +176,14 @@ def _validation_summary(error: ValidationError) -> str:
 
 def _network_error_message(error: httpx.TimeoutException | httpx.NetworkError) -> str:
     if isinstance(error, httpx.ConnectTimeout):
-        return "Kimi art direction request timed out while connecting to the provider."
+        return "StarunAgentModel art direction request timed out while connecting to the provider."
     if isinstance(error, httpx.ReadTimeout):
-        return "Kimi art direction request timed out while waiting for the provider response."
+        return "StarunAgentModel art direction request timed out while waiting for the provider response."
     if isinstance(error, httpx.WriteTimeout):
         return (
-            "Kimi art direction request timed out while uploading the reference image; "
+            "StarunAgentModel art direction request timed out while uploading the reference image; "
             "the preview may be too large for the provider connection."
         )
     if isinstance(error, httpx.PoolTimeout):
-        return "Kimi art direction request timed out waiting for an HTTP connection slot."
-    return f"Kimi art direction network error: {type(error).__name__}."
+        return "StarunAgentModel art direction request timed out waiting for an HTTP connection slot."
+    return f"StarunAgentModel art direction network error: {type(error).__name__}."

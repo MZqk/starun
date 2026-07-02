@@ -861,20 +861,26 @@ def find_starnet_executable(user_path=None):
             os.path.join(home, "Applications/StarNet2/starnet++"),
             os.path.join(home, "Applications/StarNet/starnet2"),
             os.path.join(os.path.dirname(__file__), "starnet++"),
+            os.path.join(os.path.dirname(__file__), "StarNet2", "starnet2"),
             os.path.join(os.path.dirname(__file__), "StarNet2", "starnet++"),
         ]
     elif "linux" in sys_platform:
         default_paths = [
             "/usr/local/bin/starnet++",
+            "/usr/local/bin/starnet2",
             os.path.join(home, ".local/bin/starnet++"),
+            os.path.join(home, ".local/bin/starnet2"),
             os.path.join(os.path.dirname(__file__), "starnet++"),
+            os.path.join(os.path.dirname(__file__), "StarNet2", "starnet2"),
             os.path.join(os.path.dirname(__file__), "StarNet2", "starnet++"),
         ]
     else:
         # 其他系统，如 windows
         default_paths = [
             os.path.join(os.path.dirname(__file__), "starnet++.exe"),
+            os.path.join(os.path.dirname(__file__), "starnet2.exe"),
             os.path.join(os.path.dirname(__file__), "starnet++"),
+            os.path.join(os.path.dirname(__file__), "StarNet2", "starnet2"),
         ]
 
     for p in default_paths:
